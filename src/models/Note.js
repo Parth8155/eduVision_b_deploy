@@ -140,6 +140,17 @@ const noteSchema = new mongoose.Schema(
         default: 0,
       },
     },
+    
+    // PDF annotations (highlights, drawings, markers, etc.)
+    annotations: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {
+        highlights: [],
+        drawings: [],
+        numberMarkers: [],
+        lastModified: null
+      }
+    },
   },
   {
     timestamps: true,
