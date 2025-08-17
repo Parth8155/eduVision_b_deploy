@@ -167,6 +167,23 @@ router.post(
   chatController.generateStudyQuestions
 );
 
+// Generate summary
+router.post(
+  "/generate-summary/:noteId",
+  validateNoteId,
+  [
+    body("length")
+      .optional()
+      .isIn(["short", "medium", "long"])
+      .withMessage("Invalid summary length"),
+    body("format")
+      .optional()
+      .isIn(["structured", "paragraphs", "bullet-points"])
+      .withMessage("Invalid summary format"),
+  ],
+  chatController.generateSummary
+);
+
 // Get conversation starters
 router.get(
   "/conversation-starters/:noteId",

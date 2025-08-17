@@ -384,6 +384,94 @@ FORMAT YOUR RESPONSES WITH PROPER STRUCTURE:
     };
   }
 
+  // Generate MCQs specifically with answers and explanations
+  async generateMCQWithExplanations(note, options = {}) {
+    // Keep these variables in outer scope so catch blocks can use them for fallback
+    const { count = 5, difficulty = "medium" } = options;
+
+    try {
+      if (!this.openai) {
+        return this.getMockMCQs(note, count, difficulty);
+      }
+
+      const noteContext = this.buildNoteContext(note);
+
+      const prompt = `Based on the following note content, generate ${count} multiple-choice questions at ${difficulty} difficulty level with detailed explanations:\n\n${noteContext}\n\nRequirements:\n- Generate exactly ${count} multiple-choice questions\n- Each question should have 4 options (A, B, C, D)\n- Include the correct answer\n- Provide detailed explanation for why the correct answer is right\n- Difficulty level: ${difficulty}\n\nPlease format the response as a JSON array with the following structure:\n[\n  {\n    "id": 1,\n    "question": "Question text here?",\n    "options": [\n      "Option A text",\n      "Option B text", \n      "Option C text",\n      "Option D text"\n    ],\n    "correct": 0,\n    "correctAnswer": "A",\n    "explanation": "Detailed explanation of why this is the correct answer and why other options are incorrect.",\n    "difficulty": "${difficulty}",\n    "subject": "${note.subject}",\n    "points": 5,\n    "topic": "Main topic this question covers"\n  }\n]\n\nMake sure all questions are based on the actual content from the notes and explanations are educational and help with learning.`;
+
+      const completion = await this.openai.chat.completions.create({
+        model: "deepseek/deepseek-r1:free",
+        messages: [
+          {
+            role: "system",
+            content: "You are an educational AI that creates high-quality multiple-choice questions with detailed explanations. Always respond with valid JSON only. Focus on creating questions that test understanding, not just memorization.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 3000,
+        extra_body: {},
+      });
+
+      const response = completion.choices[0].message.content;
+
+      // Use the resilient extractor to handle markdown/code fences and partial JSON
+      let questions;
+      try {
+        questions = this.extractJsonFromResponse(response);
+      } catch (parseErr) {
+        console.error("Failed to extract JSON for MCQs:", parseErr);
+        console.log("Raw AI response:", response);
+        return this.getMockMCQs(note, count, difficulty);
+      }
+
+      // Ensure proper structure
+      return (questions || []).map((q, index) => ({
+        id: q.id || index + 1,
+        question: q.question,
+        options: q.options || [],
+        correct: typeof q.correct === 'number' ? q.correct : q.correct || 0,
+        correctAnswer: q.correctAnswer || "A",
+        explanation: q.explanation || "No explanation provided",
+        difficulty: q.difficulty || difficulty,
+        subject: q.subject || note.subject,
+        points: q.points || 5,
+        topic: q.topic || note.title,
+      }));
+
+    } catch (error) {
+      console.error("Error generating MCQs:", error);
+      return this.getMockMCQs(note, count, difficulty);
+    }
+  }
+
+  // Mock MCQs for when AI is not available
+  getMockMCQs(note, count = 5, difficulty = "medium") {
+    const questions = [];
+    for (let i = 0; i < count; i++) {
+      questions.push({
+        id: i + 1,
+        question: `What is a key concept from "${note.title}"?`,
+        options: [
+          "Primary concept discussed in the material",
+          "Secondary supporting detail",
+          "Background information only", 
+          "Unrelated information"
+        ],
+        correct: 0,
+        correctAnswer: "A",
+        explanation: `This question tests understanding of the main concepts from ${note.title}. Option A is correct because it directly relates to the primary material covered in the notes.`,
+        difficulty: difficulty,
+        subject: note.subject,
+        points: 5,
+        topic: note.title
+      });
+    }
+    return questions;
+  }
+
   async generateStudyQuestions(
     note,
     questionType = "mixed",
@@ -566,6 +654,183 @@ Example format:
       `What are some practical applications of these ideas?`,
       `Can you help me create practice questions for this material?`,
     ];
+  }
+
+  async generateNoteSummary(note, length = "medium", format = "structured") {
+    try {
+      if (!this.openai) {
+        return this.getMockSummary(note, length, format);
+      }
+
+      const noteContext = this.buildNoteContext(note);
+      
+      let lengthInstruction;
+      switch (length) {
+        case "short":
+          lengthInstruction = "Keep the summary concise (2-3 paragraphs max).";
+          break;
+        case "long":
+          lengthInstruction = "Provide a detailed comprehensive summary (5+ paragraphs).";
+          break;
+        default:
+          lengthInstruction = "Create a medium-length summary (3-4 paragraphs).";
+      }
+
+      let formatInstruction;
+      switch (format) {
+        case "bullet-points":
+          formatInstruction = "Format the summary as bullet points with clear hierarchical structure.";
+          break;
+        case "paragraphs":
+          formatInstruction = "Format the summary as flowing paragraphs with smooth transitions.";
+          break;
+        default:
+          formatInstruction = "Use a structured format with clear sections, headings, and key points highlighted.";
+      }
+
+      const prompt = `Please create a comprehensive summary of the following study material:
+
+${noteContext}
+
+Requirements:
+- ${lengthInstruction}
+- ${formatInstruction}
+- Include key concepts, main topics, and important details
+- Highlight critical information that students should remember
+- Use clear, academic language appropriate for studying
+- If there are formulas, definitions, or important facts, make them prominent
+- Structure the content logically for easy review
+
+Please format your response using markdown with proper structure:
+- Use ### for main section headings
+- Use #### for subsection headings
+- Use **bold text** for key terms and concepts
+- Use bullet points for lists
+- Use numbered lists for processes or steps
+- Include relevant emojis to make sections visually distinct
+- Add horizontal rules (---) to separate major sections`;
+
+      const completion = await this.openai.chat.completions.create({
+        model: "deepseek/deepseek-r1:free",
+        messages: [
+          {
+            role: "system",
+            content: "You are an educational AI that creates comprehensive study summaries. Always provide well-structured, informative summaries using proper markdown formatting.",
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.3, // Lower temperature for more consistent summaries
+        max_tokens: 2500,
+        extra_body: {},
+      });
+
+      const response = completion.choices[0].message.content;
+      
+      return {
+        content: response,
+        title: `Summary: ${note.title}`,
+        subject: note.subject,
+        length: length,
+        format: format,
+        keyPoints: this.extractKeyPoints(response),
+        readTime: this.estimateReadTime(response),
+        generatedAt: new Date(),
+      };
+
+    } catch (error) {
+      console.error("Generate note summary error:", error);
+      return this.getMockSummary(note, length, format);
+    }
+  }
+
+  getMockSummary(note, length, format) {
+    const baseContent = `### 📚 Summary of ${note.title}
+
+**Subject:** ${note.subject}
+
+---
+
+#### 🔍 **Key Concepts**
+
+This material covers fundamental concepts in ${note.subject}, providing essential knowledge for understanding the subject matter.
+
+#### 💡 **Main Topics**
+
+- **Primary Topic**: Core concepts and principles
+- **Secondary Topics**: Supporting ideas and examples  
+- **Applications**: Practical uses and implementations
+- **Important Details**: Critical information to remember
+
+---
+
+#### 🛠️ **Study Points**
+
+1. **Definition**: Key terms and their meanings
+2. **Process**: Step-by-step procedures or methods
+3. **Examples**: Illustrative cases and scenarios
+4. **Practice**: Exercises and applications
+
+---
+
+#### 🧩 **Key Takeaways**
+
+- Understanding the fundamental principles is crucial
+- Practice with examples reinforces learning
+- Regular review helps retention
+- Connect concepts to real-world applications
+
+*Note: This is a generated summary. Please refer to the original material for complete details.*`;
+
+    return {
+      content: baseContent,
+      title: `Summary: ${note.title}`,
+      subject: note.subject,
+      length: length,
+      format: format,
+      keyPoints: [
+        "Fundamental concepts and principles",
+        "Supporting ideas and examples",
+        "Practical applications",
+        "Critical information to remember"
+      ],
+      readTime: "5 min",
+      generatedAt: new Date(),
+    };
+  }
+
+  extractKeyPoints(content) {
+    const points = [];
+    const lines = content.split('\n');
+    
+    for (const line of lines) {
+      const trimmed = line.trim();
+      // Extract bullet points
+      if (trimmed.startsWith('- **') || trimmed.startsWith('* **')) {
+        const point = trimmed.replace(/^[-*]\s*\*\*(.*?)\*\*.*/, '$1');
+        if (point && point !== trimmed) {
+          points.push(point);
+        }
+      }
+      // Extract numbered points
+      else if (trimmed.match(/^\d+\.\s*\*\*(.*?)\*\*/)) {
+        const point = trimmed.replace(/^\d+\.\s*\*\*(.*?)\*\*.*/, '$1');
+        if (point) {
+          points.push(point);
+        }
+      }
+    }
+    
+    return points.slice(0, 6); // Return max 6 key points
+  }
+
+  estimateReadTime(content) {
+    const wordsPerMinute = 200; // Average reading speed
+    const wordCount = content.split(/\s+/).length;
+    const minutes = Math.ceil(wordCount / wordsPerMinute);
+    return `${minutes} min`;
   }
 }
 

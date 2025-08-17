@@ -14,6 +14,7 @@ const fileRoutes = require("./routes/files");
 const chatRoutes = require("./routes/chat");
 const userNotesRoutes = require("./routes/userNotes");
 const annotationsRoutes = require("./routes/annotations");
+const studyMaterialsRoutes = require("./routes/studyMaterials");
 
 const app = express();
 
@@ -83,6 +84,7 @@ app.use("/api/upload", uploadRoutes);
 app.use("/api/files", fileRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/annotations", annotationsRoutes);
+app.use("/api/study-materials", studyMaterialsRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

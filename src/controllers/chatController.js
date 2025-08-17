@@ -576,6 +576,48 @@ class ChatController {
       });
     }
   }
+
+  // Generate summary from note content
+  async generateSummary(req, res) {
+    try {
+      const { noteId } = req.params;
+      const { length = "medium", format = "structured" } = req.body;
+      const userId = req.user.id;
+
+      // Validate note exists and user has access
+      const note = await Note.findOne({ _id: noteId, userId });
+      if (!note) {
+        return res.status(404).json({
+          success: false,
+          message: "Note not found or access denied",
+        });
+      }
+
+      // Generate summary using AI service
+      const summary = await chatService.generateNoteSummary(
+        note,
+        length,
+        format
+      );
+
+      res.json({
+        success: true,
+        data: {
+          summary,
+          noteId: note._id,
+          noteTitle: note.title,
+          generatedAt: new Date(),
+        },
+      });
+    } catch (error) {
+      console.error("Generate summary error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to generate summary",
+        error: error.message,
+      });
+    }
+  }
 }
 
 module.exports = new ChatController();
