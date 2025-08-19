@@ -13,7 +13,6 @@ const sanitizePath = require("sanitize-filename");
 const { jsPDF } = require("jspdf");
 const PDFDocument = require("pdfkit");
 const { PDFDocument: PDFLib, rgb, StandardFonts } = require("pdf-lib");
-const { CognitiveServicesCredentials } = require("@azure/ms-rest-azure-js");
 
 // Configuration constants
 const CONFIG = {

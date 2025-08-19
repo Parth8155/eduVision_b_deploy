@@ -10,7 +10,7 @@ const {
 } = require("../middleware/validation");
 
 // Rate limiting for auth routes
-const authRateLimit = validateRateLimit(5, 15 * 60 * 1000); // 5 attempts per 15 minutes
+const authRateLimit = validateRateLimit(10, 15 * 60 * 1000); // 5 attempts per 15 minutes
 
 // Public routes
 router.post(

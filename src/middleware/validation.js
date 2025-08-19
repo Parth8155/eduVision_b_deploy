@@ -88,7 +88,7 @@ const sanitizeInput = (req, res, next) => {
 };
 
 // Rate limiting validation
-const validateRateLimit = (maxAttempts = 5, windowMs = 15 * 60 * 1000) => {
+const validateRateLimit = (maxAttempts = 10, windowMs = 15 * 60 * 1000) => {
   const attempts = new Map();
 
   return (req, res, next) => {

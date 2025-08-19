@@ -1,5 +1,4 @@
 const express = require("express");
-const helmet = require("helmet");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const rateLimit = require("express-rate-limit");
@@ -20,9 +19,6 @@ const app = express();
 
 // Connect to MongoDB
 connectDB();
-
-// Security middleware
-app.use(helmet());
 
 // CORS configuration - Updated to handle multiple origins
 const corsOptions = {
@@ -66,12 +62,8 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Body parsing middleware
-app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(cookieParser());
-
-// Trust proxy (for rate limiting and IP detection)
-app.set("trust proxy", 1);
 
 // Serve static files
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
@@ -85,33 +77,6 @@ app.use("/api/files", fileRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/annotations", annotationsRoutes);
 app.use("/api/study-materials", studyMaterialsRoutes);
-
-// Health check
-app.get("/api/health", (req, res) => {
-  res.json({
-    success: true,
-    status: "OK",
-    message: "Server is running",
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || "development",
-  });
-});
-
-// Sample route
-app.get("/", (req, res) => {
-  res.json({
-    success: true,
-    message: "Welcome to eduVision Backend API!",
-    endpoints: {
-      auth: "/api/auth",
-      notes: "/api/notes",
-      userNotes: "/api/user-notes",
-      upload: "/api/upload",
-      chat: "/api/chat",
-      health: "/api/health",
-    },
-  });
-});
 
 // Error handling middleware
 app.use((error, req, res, next) => {
@@ -153,8 +118,6 @@ app.listen(port, () => {
   console.log(
     `eduVision Backend Server is running on http://localhost:${port}`
   );
-  console.log(`Health check: http://localhost:${port}/api/health`);
-  console.log(`Auth endpoints: http://localhost:${port}/api/auth`);
 });
 
 module.exports = app;
