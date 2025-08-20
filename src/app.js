@@ -62,6 +62,7 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Body parsing middleware
+app.use(express.json({ limit: "10mb" })); // Add this line for JSON parsing
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(cookieParser());
 
