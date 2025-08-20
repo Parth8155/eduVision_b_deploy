@@ -20,17 +20,25 @@ const app = express();
 // Connect to MongoDB
 connectDB();
 
-// CORS configuration - Updated to handle multiple origins
+// CORS configuration - Updated to handle multiple origins and environment variables
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
 
-     const allowedOrigins = [
-        "https://delightful-water-091bb7200.2.azurestaticapps.net"
+    // Get allowed origins from environment variable or use defaults
+    const envOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : [];
+    const allowedOrigins = [
+      "http://localhost:3000",
+      "http://localhost:5173",
+      "https://delightful-water-091bb7200.2.azurestaticapps.net",
+      ...envOrigins
     ];
 
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    // Allow any origin ending with .azurestaticapps.net
+    const isAzureStaticApp = origin && origin.endsWith('.azurestaticapps.net');
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || isAzureStaticApp) {
       callback(null, true);
     } else {
       console.log("Blocked by CORS:", origin);
