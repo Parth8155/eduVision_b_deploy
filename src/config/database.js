@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
-    const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/eduVision';
+    const mongoURI = process.env.MONGODB_URI || 'mongodb+srv://parthmaheriya76:iRQ1JWmA7qjlIN02@eduvision-database.z6hlxdb.mongodb.net/eduvision';
     
     const conn = await mongoose.connect(mongoURI);
     

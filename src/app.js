@@ -27,7 +27,7 @@ const corsOptions = {
     if (!origin) return callback(null, true);
 
      const allowedOrigins = [
-      "https://delightful-water-091bb7200.2.azurestaticapps.net"
+        "https://delightful-water-091bb7200.2.azurestaticapps.net"
     ];
 
     if (allowedOrigins.indexOf(origin) !== -1) {
