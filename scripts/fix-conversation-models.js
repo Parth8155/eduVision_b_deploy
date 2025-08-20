@@ -21,7 +21,6 @@ async function fixConversationModels() {
       ],
     });
 
-    console.log(`Found ${conversations.length} conversations to fix`);
 
     for (const conversation of conversations) {
       // Update the settings to use the correct DeepSeek model
@@ -38,12 +37,9 @@ async function fixConversationModels() {
         }
       );
 
-      console.log(
-        `Fixed conversation ${conversation._id}: ${conversation.title}`
-      );
+     
     }
 
-    console.log("All conversations fixed successfully!");
     process.exit(0);
   } catch (error) {
     console.error("Error fixing conversations:", error);

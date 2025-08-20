@@ -11,7 +11,6 @@ const authController = {
     try {
       const { firstName, lastName, email, password } = req.body;
 
-      console.log("Registration attempt:", { firstName, lastName, email });
 
       // Validation checks
       const errors = [];
@@ -87,7 +86,6 @@ const authController = {
       // Check if user already exists
       const existingUser = await User.findByEmail(email.trim().toLowerCase());
       if (existingUser) {
-        console.log("User already exists:", email);
         return res.status(409).json({
           success: false,
           message:
@@ -116,7 +114,6 @@ const authController = {
       });
 
       await user.save();
-      console.log("User created successfully:", user._id);
 
       // Generate tokens
       const { accessToken, refreshToken } = generateTokens({
@@ -142,7 +139,6 @@ const authController = {
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
       });
 
-      console.log("Registration successful for:", email);
 
       res.status(201).json({
         success: true,
@@ -191,7 +187,6 @@ const authController = {
     try {
       const { email, password, rememberMe } = req.body;
 
-      console.log("Login attempt:", { email, rememberMe });
 
       // Validation checks
       const errors = [];
@@ -222,7 +217,6 @@ const authController = {
         "+password"
       );
       if (!user) {
-        console.log("User not found:", email);
         return res.status(401).json({
           success: false,
           message:
@@ -253,7 +247,6 @@ const authController = {
       // Check password
       const isPasswordValid = await user.comparePassword(password);
       if (!isPasswordValid) {
-        console.log("Invalid password for:", email);
         return res.status(401).json({
           success: false,
           message:
@@ -296,7 +289,6 @@ const authController = {
         maxAge: (rememberMe ? 30 : 7) * 24 * 60 * 60 * 1000,
       });
 
-      console.log("Login successful for:", email);
 
       res.json({
         success: true,
@@ -443,7 +435,6 @@ const authController = {
     try {
       const { email } = req.body;
 
-      console.log("Forgot password request for:", email);
 
       // Validation
       if (!email || !email.trim()) {
@@ -469,7 +460,6 @@ const authController = {
         "If an account with that email exists, we've sent a password reset link to it.";
 
       if (!user) {
-        console.log("Password reset requested for non-existent email:", email);
         return res.json({
           success: true,
           message: successMessage,
@@ -478,7 +468,6 @@ const authController = {
 
       // Check if user account is active
       if (user.status === "suspended" || user.status === "deleted") {
-        console.log("Password reset requested for inactive account:", email);
         return res.json({
           success: true,
           message: successMessage,
@@ -505,7 +494,6 @@ const authController = {
           resetToken,
           user.firstName
         );
-        console.log("Password reset email sent to:", email);
       } catch (emailError) {
         console.error("Failed to send password reset email:", emailError);
         // Clear the reset token if email fails
@@ -537,10 +525,6 @@ const authController = {
     try {
       const { token, password } = req.body;
 
-      console.log(
-        "Password reset attempt with token:",
-        token?.substring(0, 10) + "..."
-      );
 
       // Validation
       const errors = [];
@@ -591,7 +575,6 @@ const authController = {
       }).select("+password");
 
       if (!user) {
-        console.log("Invalid or expired reset token");
         return res.status(400).json({
           success: false,
           message:
@@ -609,7 +592,6 @@ const authController = {
 
       await user.save();
 
-      console.log("Password reset successful for:", user.email);
 
       // Send confirmation email
       try {

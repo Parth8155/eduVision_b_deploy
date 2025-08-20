@@ -18,7 +18,6 @@ async function resetDatabase() {
       }
     }
     
-    console.log('Database reset complete');
   } catch (error) {
     console.error('Error:', error);
   } finally {

@@ -82,7 +82,6 @@ class ChatController {
   // Send a message and get AI response
   async sendMessage(req, res) {
     try {
-      console.log("messaged...");
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
         return res.status(400).json({
@@ -150,7 +149,6 @@ class ChatController {
         message,
         context
       );
-      console.log("responce from ai " + aiResponse);
 
       // Add AI response to conversation
       await conversation.addMessage(
@@ -163,7 +161,6 @@ class ChatController {
       conversation.metadata.totalTokensUsed += aiResponse.tokensUsed || 0;
       await conversation.save();
 
-      console.log("data :- " + aiResponse.content);
       res.json({
         success: true,
         data: {

@@ -9,10 +9,7 @@ const uploadController = {
   // Upload single file (flexible field names)
   uploadSingle: async (req, res) => {
     try {
-      console.log("Single upload controller called");
-      console.log("req.file:", req.file);
-      console.log("req.files:", req.files);
-
+   
       // Check if we have a file (either in req.file or req.files)
       const file = req.file || (req.files && req.files[0]);
 
@@ -39,9 +36,7 @@ const uploadController = {
   // Upload multiple files (flexible field names)
   uploadMultiple: async (req, res) => {
     try {
-      console.log("Multiple upload controller called");
-      console.log("req.files:", req.files);
-
+    
       if (!req.files || req.files.length === 0) {
         return sendError(res, "No files uploaded", 400);
       }
@@ -65,8 +60,7 @@ const uploadController = {
   // Flexible upload - accepts any field name
   uploadFlexible: async (req, res) => {
     try {
-      console.log("Flexible upload controller called");
-      console.log("req.files:", req.files);
+     
 
       if (!req.files || req.files.length === 0) {
         return sendError(res, "No files uploaded", 400);
@@ -97,10 +91,7 @@ const uploadController = {
   // Combined upload and create note
   uploadAndCreateNote: async (req, res) => {
     try {
-      console.log("Combined upload and create note called");
-      console.log("User:", req.user ? req.user._id : "No user");
-      console.log("req.files:", req.files);
-      console.log("req.body:", req.body);
+   
 
       // Check if user is authenticated
       if (!req.user) {
@@ -109,7 +100,6 @@ const uploadController = {
 
       // Check if files exist and are in array format
       if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
-        console.log("No files found in request");
         return sendError(res, "No files uploaded", 400);
       }
 
@@ -134,7 +124,6 @@ const uploadController = {
       const folder = req.body.folder || req.body.Folder || "General";
       const tags = req.body.tags || req.body.Tags || "";
 
-      console.log("Extracted fields:", { title, subject, folder, tags });
 
       // If no title/subject provided, generate from filename
       let finalTitle = title.trim();
@@ -144,13 +133,11 @@ const uploadController = {
         // Generate title from first file name
         const firstFile = req.files[0];
         finalTitle = firstFile.originalname.replace(/\.[^/.]+$/, ""); // Remove extension
-        console.log("Generated title from filename:", finalTitle);
       }
 
       if (!finalSubject) {
         // Generate subject from title or use "General"
         finalSubject = "General Notes";
-        console.log("Generated subject:", finalSubject);
       }
 
       // Validate minimum requirements
@@ -216,7 +203,6 @@ const uploadController = {
       });
 
       await note.save();
-      console.log("Note saved with ID:", note._id, "for user:", req.user._id);
 
       // Update user's usage statistics
       await User.findByIdAndUpdate(req.user._id, {
@@ -478,10 +464,10 @@ function getSubjectColor(subject) {
   return colors[Math.abs(hash) % colors.length];
 }
 
-// Updated async function to process files with binary storage and overlay PDF generation
+// Updated async function to process files with enhanced error handling and PDF validation
 async function processNoteFiles(noteId, filePath) {
   try {
-    console.log(`Processing note ${noteId} with file: ${filePath}`);
+    console.log(`🔄 Starting OCR processing for note ${noteId}, file: ${filePath}`);
 
     // Get the note from database
     const note = await Note.findById(noteId);
@@ -489,22 +475,63 @@ async function processNoteFiles(noteId, filePath) {
       throw new Error("Note not found");
     }
 
-    // Extract text with automatic overlay PDF generation
-    const result = await ocrService.extractTextWithOverlay(
-      filePath,
-      note.originalFile.mimetype,
-      true
-    );
+    // Validate input file exists and is accessible
+    try {
+      const fileStats = await fs.stat(filePath);
+      console.log(`📁 Input file size: ${fileStats.size} bytes`);
+      
+      if (fileStats.size === 0) {
+        throw new Error("Input file is empty");
+      }
+      
+      if (fileStats.size > 50 * 1024 * 1024) { // 50MB limit
+        throw new Error("Input file is too large (>50MB)");
+      }
+    } catch (statError) {
+      throw new Error(`Cannot access input file: ${statError.message}`);
+    }
+
+    // Extract text with automatic overlay PDF generation and enhanced error handling
+    console.log(`🔍 Starting OCR extraction for ${note.originalFile.mimetype}`);
+    
+    let result;
+    try {
+      result = await ocrService.extractTextWithOverlay(
+        filePath,
+        note.originalFile.mimetype,
+        true
+      );
+    } catch (ocrError) {
+      console.error(`OCR processing failed: ${ocrError.message}`);
+      throw new Error(`OCR processing failed: ${ocrError.message}`);
+    }
+
+    if (!result) {
+      throw new Error("OCR service returned no results");
+    }
+
+    console.log(`📝 OCR completed: confidence=${result.confidence}%, pages=${result.pages}, skipped=${result.skippedOCR}`);
 
     let ocrPDFData = null;
 
     // Handle different scenarios based on whether OCR was performed
     if (result.skippedOCR && result.originallySearchable) {
       // PDF already had searchable text - use original file as OCR PDF
-      console.log("✅ PDF already searchable, using original file as OCR PDF");
+      console.log("📄 PDF already searchable, using original file");
 
       try {
         const originalPDFBuffer = await fs.readFile(filePath);
+        
+        // Validate PDF structure
+        if (originalPDFBuffer.length < 100) {
+          throw new Error("Original PDF is too small");
+        }
+        
+        const header = originalPDFBuffer.slice(0, 10).toString('ascii');
+        if (!header.startsWith('%PDF-')) {
+          throw new Error("Original file is not a valid PDF");
+        }
+
         ocrPDFData = {
           mimetype: "application/pdf",
           size: originalPDFBuffer.length,
@@ -514,16 +541,30 @@ async function processNoteFiles(noteId, filePath) {
           isOriginal: true, // Flag to indicate this is the original file
         };
 
-        console.log(
-          `Original searchable PDF stored as OCR PDF. Size: ${originalPDFBuffer.length} bytes, Pages: ${result.pages}`
-        );
+        console.log(`✅ Using original PDF as searchable PDF (${ocrPDFData.size} bytes)`);
       } catch (readError) {
         console.error(`Error reading original PDF: ${readError.message}`);
+        throw new Error(`Failed to process original PDF: ${readError.message}`);
       }
     } else if (result.overlayPDFPath) {
       // OCR was performed and overlay PDF was generated
+      console.log(`📄 OCR overlay PDF generated: ${result.overlayPDFPath}`);
+      
       try {
+        // Validate overlay PDF exists
+        const overlayStats = await fs.stat(result.overlayPDFPath);
+        if (overlayStats.size === 0) {
+          throw new Error("Generated overlay PDF is empty");
+        }
+
         const overlayPDFBuffer = await fs.readFile(result.overlayPDFPath);
+        
+        // Validate overlay PDF structure
+        const header = overlayPDFBuffer.slice(0, 10).toString('ascii');
+        if (!header.startsWith('%PDF-')) {
+          throw new Error("Generated overlay PDF is corrupted");
+        }
+
         ocrPDFData = {
           mimetype: "application/pdf",
           size: overlayPDFBuffer.length,
@@ -533,75 +574,101 @@ async function processNoteFiles(noteId, filePath) {
           isOriginal: false, // Flag to indicate this is OCR-generated
         };
 
-        console.log(
-          `OCR overlay PDF read as binary data. Size: ${overlayPDFBuffer.length} bytes, Pages: ${result.pages}`
-        );
+        console.log(`✅ Using OCR overlay PDF (${ocrPDFData.size} bytes)`);
 
         // Clean up the temporary overlay PDF file
         try {
           await fs.unlink(result.overlayPDFPath);
-          console.log(
-            `Cleaned up temporary overlay PDF: ${result.overlayPDFPath}`
-          );
+          console.log(`🗑️ Cleaned up temporary file: ${result.overlayPDFPath}`);
         } catch (cleanupError) {
-          console.warn(
-            `Failed to cleanup temporary file: ${cleanupError.message}`
-          );
+          console.warn(`Failed to cleanup temporary file: ${cleanupError.message}`);
         }
       } catch (readError) {
         console.error(`Error reading overlay PDF: ${readError.message}`);
+        throw new Error(`Failed to process overlay PDF: ${readError.message}`);
+      }
+    } else {
+      // OCR was performed but no overlay PDF was created - this is an error condition
+      console.warn("OCR was performed but no overlay PDF was created");
+      
+      if (!result.text || result.text.trim().length === 0) {
+        console.warn("No text was extracted from the file");
       }
     }
 
-    // Update note with extracted text and processed data
+    // Prepare update data with validation
     const updateData = {
       extractedText: result.text || "",
       confidence: Math.round(result.confidence || 0),
       status: "completed",
       accuracy: Math.round(result.confidence || 0),
       pages: result.pages || 1,
-      // Add flags to track processing type
       skippedOCR: result.skippedOCR || false,
       originallySearchable: result.originallySearchable || false,
+      processedAt: new Date(),
     };
+
+    // Validate extracted text
+    if (updateData.extractedText.length === 0) {
+      console.warn("No text was extracted from the document");
+      updateData.status = "completed_no_text";
+    } else if (updateData.extractedText.length < 50) {
+      console.warn("Very little text was extracted from the document");
+    }
 
     // If we have OCR PDF data, store it as binary
     if (ocrPDFData) {
       updateData.ocrTextPDF = ocrPDFData;
+      console.log(`💾 Storing OCR PDF data: ${ocrPDFData.size} bytes, ${ocrPDFData.pages} pages`);
+    } else {
+      console.warn("No OCR PDF data available - PDF viewing may not work properly");
     }
 
-    await Note.findByIdAndUpdate(noteId, updateData);
+    // Update note with processed data
+    try {
+      await Note.findByIdAndUpdate(noteId, updateData);
+      console.log(`✅ Note ${noteId} updated successfully`);
+    } catch (updateError) {
+      console.error(`Failed to update note ${noteId}:`, updateError);
+      throw new Error(`Database update failed: ${updateError.message}`);
+    }
 
     // Clean up the original uploaded file after processing
     try {
       await fs.unlink(filePath);
-      console.log(`Cleaned up original uploaded file: ${filePath}`);
+      console.log(`🗑️ Cleaned up original uploaded file: ${filePath}`);
     } catch (cleanupError) {
       console.warn(`Failed to cleanup original file: ${cleanupError.message}`);
     }
 
-    const processingType = result.skippedOCR
-      ? "already searchable"
-      : "OCR processed";
-    console.log(
-      `Note ${noteId} processed successfully (${processingType}). OCR PDF ${
-        ocrPDFData ? "stored as binary data" : "not generated"
-      }.`
-    );
+    const processingType = result.skippedOCR ? "already searchable" : "OCR processed";
+    console.log(`🎉 Processing completed for note ${noteId}: ${processingType}`);
+    
   } catch (error) {
-    console.error(`Error processing note ${noteId}:`, error);
+    console.error(`❌ Error processing note ${noteId}:`, error);
 
-    // Mark note as failed
-    await Note.findByIdAndUpdate(noteId, {
-      status: "failed",
-    });
+    // Mark note as failed with detailed error information
+    try {
+      await Note.findByIdAndUpdate(noteId, {
+        status: "failed",
+        error: error.message,
+        failedAt: new Date(),
+      });
+      console.log(`📝 Marked note ${noteId} as failed`);
+    } catch (updateError) {
+      console.error(`Failed to update note status to failed: ${updateError.message}`);
+    }
 
     // Try to clean up the file even on failure
     try {
       await fs.unlink(filePath);
+      console.log(`🗑️ Cleaned up file after error: ${filePath}`);
     } catch (cleanupError) {
       console.warn(`Failed to cleanup file on error: ${cleanupError.message}`);
     }
+
+    // Re-throw error to allow parent handling if needed
+    throw error;
   }
 }
 

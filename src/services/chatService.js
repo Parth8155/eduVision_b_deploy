@@ -15,7 +15,6 @@ class ChatService {
           baseURL: "https://openrouter.ai/api/v1",
           apiKey: process.env.DEEPSEEK_API_KEY,
         });
-        console.log("DeepSeek service initialized successfully");
       } else {
         console.warn(
           "DeepSeek API key not found. Chat functionality will use mock responses."
@@ -30,21 +29,7 @@ class ChatService {
   // Make buildNoteContext accessible for pre-caching
   buildNoteContext(note, context = {}) {
     let noteContent = "";
-
-    // Debug logging to understand note structure
-    console.log("Note structure:", {
-      title: note.title,
-      subject: note.subject,
-      extractedTextType: typeof note.extractedText,
-      extractedTextIsArray: Array.isArray(note.extractedText),
-      extractedTextKeys: note.extractedText
-        ? Object.keys(note.extractedText)
-        : null,
-      otherFields: Object.keys(note).filter((key) =>
-        ["content", "text", "body"].includes(key)
-      ),
-    });
-
+  
     // Add basic note information
     noteContent += `Note Title: ${note.title}\n`;
     noteContent += `Subject: ${note.subject}\n`;
@@ -110,7 +95,6 @@ class ChatService {
       let note = null;
 
       if (conversation.noteContext && conversation.noteContext.extractedText) {
-        console.log("Using cached note context");
         noteContext = this.formatCachedNoteContext(conversation.noteContext);
 
         // For cached context, we'll need the note for extractNoteReferences
@@ -124,7 +108,6 @@ class ChatService {
           extractedText: conversation.noteContext.extractedText,
         };
       } else {
-        console.log("Fetching and caching note context");
         note = await Note.findById(conversation.noteId);
         if (!note) {
           throw new Error("Note not found");
@@ -423,7 +406,6 @@ FORMAT YOUR RESPONSES WITH PROPER STRUCTURE:
         questions = this.extractJsonFromResponse(response);
       } catch (parseErr) {
         console.error("Failed to extract JSON for MCQs:", parseErr);
-        console.log("Raw AI response:", response);
         return this.getMockMCQs(note, count, difficulty);
       }
 
@@ -530,7 +512,6 @@ Please format the response as a JSON array with the following structure:
         return this.extractJsonFromResponse(response);
       } catch (parseError) {
         console.error("Failed to parse AI response as JSON:", parseError);
-        console.log("Raw AI response:", response);
         return this.getMockStudyQuestions(note, questionType, count);
       }
     } catch (error) {
@@ -637,7 +618,6 @@ Example format:
           "Failed to parse conversation starters response:",
           parseError
         );
-        console.log("Raw AI response:", response);
         return this.getMockConversationStarters(note);
       }
     } catch (error) {

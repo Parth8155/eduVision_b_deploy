@@ -30,7 +30,6 @@ class EmailService {
         });
       } else {
         // Fallback to Ethereal Email for testing
-        console.log("No email configuration found, creating test account...");
         const testAccount = await nodemailer.createTestAccount();
         this.transporter = nodemailer.createTransport({
           host: "smtp.ethereal.email",
@@ -41,7 +40,6 @@ class EmailService {
             pass: testAccount.pass,
           },
         });
-        console.log("Test email account created:", testAccount.user);
       }
 
       // Verify the connection
@@ -51,11 +49,6 @@ class EmailService {
       // Create a simple fallback that logs emails instead of sending them
       this.transporter = {
         sendMail: async (options) => {
-          console.log("=== EMAIL WOULD BE SENT ===");
-          console.log("To:", options.to);
-          console.log("Subject:", options.subject);
-          console.log("Content:", options.text);
-          console.log("=========================");
           return { messageId: "fake-message-id" };
         },
       };
@@ -149,7 +142,6 @@ class EmailService {
 
     try {
       const info = await this.transporter.sendMail(mailOptions);
-      console.log("Password reset email sent:", info.messageId);
 
       // Log preview URL for Ethereal Email
       if (
@@ -157,7 +149,6 @@ class EmailService {
         !process.env.EMAIL_SERVICE &&
         nodemailer.getTestMessageUrl
       ) {
-        console.log("Preview URL:", nodemailer.getTestMessageUrl(info));
       }
 
       return { success: true, messageId: info.messageId };
@@ -235,7 +226,6 @@ class EmailService {
 
     try {
       const info = await this.transporter.sendMail(mailOptions);
-      console.log("Password changed notification sent:", info.messageId);
       return { success: true, messageId: info.messageId };
     } catch (error) {
       console.error("Failed to send password changed notification:", error);
@@ -247,7 +237,6 @@ class EmailService {
     try {
       if (this.transporter && this.transporter.verify) {
         await this.transporter.verify();
-        console.log("Email service is ready");
         return true;
       }
       return true; // For fallback transporter

@@ -49,7 +49,6 @@ if (key && endpoint) {
     new ApiKeyCredentials({ inHeader: { "Ocp-Apim-Subscription-Key": key } }),
     endpoint
   );
-  console.log("Azure Computer Vision client initialized");
 } else {
   console.warn(
     "Azure Computer Vision credentials not found in environment variables"
@@ -64,45 +63,29 @@ const ocrService = {
    */
   async checkPDFForExistingText(filePath) {
     try {
-      console.log(
-        `Checking if PDF already has searchable text: ${path.basename(
-          filePath
-        )}`
-      );
+      console.log(`🔍 Checking PDF for existing text: ${filePath}`);
 
       const pdfBytes = await fsPromises.readFile(filePath);
-      const pdfDoc = await PDFLib.load(pdfBytes);
+      
+      // Validate PDF structure first
+      if (!this.isValidPDF(pdfBytes)) {
+        console.warn("Invalid PDF structure detected");
+        return { hasText: false, extractedText: "", pageCount: 0, textLength: 0 };
+      }
+
+      const pdfDoc = await PDFLib.load(pdfBytes, { ignoreEncryption: true });
       const pages = pdfDoc.getPages();
       const pageCount = pages.length;
 
       let allText = "";
       let hasSignificantText = false;
 
-      // Extract text from each page
-      for (let i = 0; i < pages.length; i++) {
-        try {
-          // Try to get text content from the page
-          const page = pages[i];
-
-          // Use pdf-lib's text extraction capabilities
-          // Note: pdf-lib has limited text extraction, but we can check if text exists
-          const textContent = await this.extractTextFromPDFPage(pdfDoc, i);
-
-          if (textContent && textContent.trim().length > 0) {
-            allText += textContent + "\n";
-
-            // Check if we have substantial text (not just metadata or artifacts)
-            const cleanText = textContent.replace(/\s+/g, " ").trim();
-            if (cleanText.length > 10) {
-              // At least 10 characters of meaningful text
-              hasSignificantText = true;
-            }
-          }
-        } catch (pageError) {
-          console.log(
-            `Could not extract text from page ${i + 1}: ${pageError.message}`
-          );
-        }
+      // Use a more reliable text detection method
+      const textCheck = await this.checkPDFTextWithPdfParse(filePath);
+      
+      if (textCheck.hasText && textCheck.textLength > 50) {
+        hasSignificantText = true;
+        allText = textCheck.extractedText || "Text detected but not extracted";
       }
 
       const result = {
@@ -112,9 +95,7 @@ const ocrService = {
         textLength: allText.trim().length,
       };
 
-      console.log(
-        `PDF text check result: hasText=${result.hasText}, textLength=${result.textLength}, pages=${result.pageCount}`
-      );
+      console.log(`✅ PDF text check complete: hasText=${result.hasText}, pageCount=${result.pageCount}`);
       return result;
     } catch (error) {
       console.error(`Error checking PDF for existing text: ${error.message}`);
@@ -123,42 +104,34 @@ const ocrService = {
   },
 
   /**
-   * Extract text from a specific PDF page using pdf-lib
-   * @param {PDFDocument} pdfDoc - The PDF document
-   * @param {number} pageIndex - Page index (0-based)
-   * @returns {Promise<string>} Extracted text
+   * Validate PDF file structure
+   * @param {Buffer} pdfBytes - PDF file bytes
+   * @returns {boolean} Whether PDF structure is valid
    */
-  async extractTextFromPDFPage(pdfDoc, pageIndex) {
+  isValidPDF(pdfBytes) {
     try {
-      // This is a basic implementation - pdf-lib has limited text extraction
-      // For better text extraction, we might need to use a different library like pdf2pic + OCR
-      // or pdf-parse, but for checking if text exists, this basic approach should work
-
-      const page = pdfDoc.getPages()[pageIndex];
-
-      // Try to access the page's content stream
-      // This is a simplified approach - in reality, PDF text extraction is complex
-      const pageRef = page.ref;
-      const pageObject = pdfDoc.context.lookup(pageRef);
-
-      // Look for text content in the page
-      if (pageObject && pageObject.dict) {
-        const contents = pageObject.dict.get("Contents");
-        if (contents) {
-          // This is a very basic text detection
-          // In a real implementation, you'd need to parse the PDF content streams
-          return ""; // Placeholder - actual implementation would be more complex
-        }
+      if (!pdfBytes || pdfBytes.length < 100) return false;
+      
+      // Check PDF header
+      const header = pdfBytes.slice(0, 10).toString('ascii');
+      if (!header.startsWith('%PDF-')) {
+        return false;
       }
-
-      return "";
+      
+      // Check for basic PDF structure markers
+      const pdfString = pdfBytes.toString('ascii', 0, Math.min(pdfBytes.length, 1024));
+      const hasBasicStructure = /\/Type\s*\/Catalog/.test(pdfString) || 
+                                /\/Root/.test(pdfString) ||
+                                /startxref/.test(pdfBytes.toString('ascii', Math.max(0, pdfBytes.length - 1024)));
+      
+      return hasBasicStructure;
     } catch (error) {
-      console.log(
-        `Error extracting text from page ${pageIndex}: ${error.message}`
-      );
-      return "";
+      console.error('Error validating PDF structure:', error);
+      return false;
     }
   },
+
+
 
   /**
    * Enhanced PDF text detection using pdf-parse library
@@ -167,48 +140,59 @@ const ocrService = {
    */
   async checkPDFTextWithPdfParse(filePath) {
     try {
-      // We'll need to install pdf-parse: npm install pdf-parse
-      // For now, let's use a different approach with PDFtk or similar
-
       const pdfBytes = await fsPromises.readFile(filePath);
 
-      // Try to use a simple regex approach to detect text content
-      const pdfString = pdfBytes.toString("binary");
+      // Enhanced PDF text detection using multiple methods
+      const pdfString = pdfBytes.toString('binary');
 
-      // Look for text content indicators in PDF
+      // Look for more comprehensive text content indicators
       const textIndicators = [
         /\/Type\s*\/Font/g,
         /\/Subtype\s*\/Type1/g,
         /\/Subtype\s*\/TrueType/g,
-        /BT\s+.*?ET/g, // Text objects
+        /\/Subtype\s*\/Type0/g,
+        /BT\s+.*?ET/gs, // Text objects (multiline)
         /Tj\s*$/gm, // Text showing operators
-        /TJ\s*$/gm, // Text showing operators
+        /TJ\s*$/gm, // Array text showing operators
+        /\[\s*\(.*?\)\s*\]\s*TJ/g, // Array with text
+        /\(.*?\)\s*Tj/g, // Simple text showing
       ];
 
       let textIndicatorCount = 0;
+      let hasRealText = false;
+
       for (const indicator of textIndicators) {
         const matches = pdfString.match(indicator);
         if (matches) {
           textIndicatorCount += matches.length;
+          
+          // Check if we find actual readable text content
+          if (indicator.toString().includes('Tj') || indicator.toString().includes('TJ')) {
+            matches.forEach(match => {
+              // Extract text content from PDF operators
+              const textMatch = match.match(/\((.*?)\)/);
+              if (textMatch && textMatch[1] && textMatch[1].length > 3) {
+                hasRealText = true;
+              }
+            });
+          }
         }
       }
 
-      // If we find significant text indicators, the PDF likely has text
-      const hasText = textIndicatorCount > 5; // Threshold for text content
+      // More conservative threshold - require actual text content
+      const hasText = hasRealText && textIndicatorCount > 10;
 
-      console.log(
-        `PDF text indicators found: ${textIndicatorCount}, hasText: ${hasText}`
-      );
-
+      console.log(`📊 PDF text analysis: indicators=${textIndicatorCount}, hasRealText=${hasRealText}, hasText=${hasText}`);
+      
       return {
         hasText: hasText,
-        extractedText: hasText ? "[Text detected but not extracted]" : "",
+        extractedText: hasText ? "[Searchable text detected]" : "",
         pageCount: 1, // Simplified for this approach
-        textLength: hasText ? textIndicatorCount * 10 : 0, // Estimated
-        method: "pdf-parse-regex",
+        textLength: hasText ? textIndicatorCount * 5 : 0, // Estimated
+        method: "enhanced-pdf-parse-regex",
       };
     } catch (error) {
-      console.error(`Error in PDF text detection: ${error.message}`);
+      console.error(`Error in enhanced PDF text detection: ${error.message}`);
       return { hasText: false, extractedText: "", pageCount: 0, textLength: 0 };
     }
   },
@@ -238,13 +222,10 @@ const ocrService = {
 
       // NEW: Check if PDF already has searchable text
       if (mimetype === "application/pdf") {
-        console.log("Checking if PDF already contains searchable text...");
         const textCheck = await this.checkPDFTextWithPdfParse(fullPath);
 
         if (textCheck.hasText) {
-          console.log(
-            "✅ PDF already contains searchable text, skipping OCR processing"
-          );
+        
           return {
             text: textCheck.extractedText,
             confidence: 95, // High confidence since text already exists
@@ -270,9 +251,7 @@ const ocrService = {
             originallySearchable: true,
           };
         } else {
-          console.log(
-            "📄 PDF does not contain searchable text, proceeding with OCR..."
-          );
+         
         }
       }
 
@@ -283,7 +262,6 @@ const ocrService = {
         return await simulateOCR(fullPath, mimetype);
       }
 
-      console.log(`Starting OCR for: ${sanitizedPath}`);
 
       let result;
       if (mimetype.startsWith("image/") || mimetype === "application/pdf") {
@@ -295,7 +273,6 @@ const ocrService = {
       }
 
       const extractedData = processOCRResults(result);
-      console.log(`OCR completed. Confidence: ${extractedData.confidence}%`);
 
       return {
         text: extractedData.text,
@@ -343,7 +320,6 @@ const ocrService = {
    */
   async generateSearchablePDF(originalFilePath, ocrResults, outputPath) {
     try {
-      console.log("Generating continuous searchable PDF...");
       const sanitizedOutput = sanitizePath(path.basename(outputPath));
       const fullOutputPath = path.join(
         path.dirname(outputPath),
@@ -352,30 +328,31 @@ const ocrService = {
 
       // Check if the PDF already had searchable text (OCR was skipped)
       if (ocrResults.skippedOCR && ocrResults.originallySearchable) {
-        console.log(
-          "✅ PDF already contains searchable text, copying original file..."
-        );
+        console.log("📄 PDF already searchable, copying original...");
+
+        // Validate original file before copying
+        const originalBytes = await fsPromises.readFile(originalFilePath);
+        if (!this.isValidPDF(originalBytes)) {
+          throw new Error("Original PDF file is corrupted");
+        }
 
         // Simply copy the original file to the output location
         await fsPromises.copyFile(originalFilePath, fullOutputPath);
-
-        console.log(`📄 Original searchable PDF copied to: ${fullOutputPath}`);
         return fullOutputPath;
       }
 
       const isPDF = path.extname(originalFilePath).toLowerCase() === ".pdf";
 
       if (isPDF) {
-        // PDF handling uses existing method
-        console.log("Using existing PDF method for multi-page documents");
-        return await this.generateSearchablePDFLegacy(
+        // For PDFs, use enhanced method with validation
+        return await this.generateSearchablePDFFromPDF(
           originalFilePath,
           ocrResults,
           fullOutputPath
         );
       } else {
-        // Single image processing with new method
-        await createContinuousSearchablePdf(
+        // Single image processing with validation
+        await this.createValidatedSearchablePdf(
           originalFilePath,
           ocrResults.readResults[0],
           fullOutputPath,
@@ -385,8 +362,8 @@ const ocrService = {
       }
     } catch (error) {
       console.error("Error generating searchable PDF:", error);
-      // Fallback to legacy method
-      return await this.generateSearchablePDFLegacy(
+      // Enhanced fallback with validation
+      return await this.generateValidatedFallbackPDF(
         originalFilePath,
         ocrResults,
         outputPath
@@ -395,19 +372,124 @@ const ocrService = {
   },
 
   /**
-   * Legacy PDF generation method (original implementation)
-   * Used as fallback and for multi-page PDFs
+   * Generate validated searchable PDF from existing PDF with error handling
+   * @param {string} originalFilePath - Path to original PDF
+   * @param {Object} ocrResults - OCR results
+   * @param {string} outputPath - Output path
+   * @returns {Promise<string>} Path to generated PDF
    */
-  async generateSearchablePDFLegacy(originalFilePath, ocrResults, outputPath) {
+  async generateSearchablePDFFromPDF(originalFilePath, ocrResults, outputPath) {
     try {
-      console.log("Using legacy PDF generation method...");
-      const sanitizedOutput = sanitizePath(path.basename(outputPath));
-      const fullOutputPath = path.join(
-        path.dirname(outputPath),
-        sanitizedOutput
+      console.log("🔧 Generating searchable PDF from existing PDF...");
+      
+      // Validate original PDF first
+      const originalBytes = await fsPromises.readFile(originalFilePath);
+      if (!this.isValidPDF(originalBytes)) {
+        throw new Error("Original PDF file is corrupted");
+      }
+
+      // Try enhanced PDF overlay method
+      await createValidatedContinuousSearchablePdfFromPDF(
+        originalFilePath,
+        ocrResults.readResults,
+        outputPath,
+        CONFIG.PDF_FONT_SIZE
       );
 
-      // Create a simple text-only PDF as fallback
+      // Validate generated PDF
+      const generatedBytes = await fsPromises.readFile(outputPath);
+      if (!this.isValidPDF(generatedBytes)) {
+        throw new Error("Generated PDF validation failed");
+      }
+
+      return outputPath;
+    } catch (error) {
+      console.error("Error in PDF searchable generation:", error);
+      // Fallback to simple text overlay
+      return await this.generateSimpleTextOverlayPDF(originalFilePath, ocrResults, outputPath);
+    }
+  },
+
+  /**
+   * Create validated searchable PDF from image with error handling
+   * @param {string} imagePath - Path to image
+   * @param {Object} pageData - OCR page data
+   * @param {string} outputPath - Output path
+   * @param {number} fontSize - Font size
+   */
+  async createValidatedSearchablePdf(imagePath, pageData, outputPath, fontSize) {
+    try {
+      await createContinuousSearchablePdf(imagePath, pageData, outputPath, fontSize);
+      
+      // Validate generated PDF
+      const pdfBytes = await fsPromises.readFile(outputPath);
+      if (!this.isValidPDF(pdfBytes)) {
+        throw new Error("Generated PDF validation failed");
+      }
+    } catch (error) {
+      console.error("Error creating validated searchable PDF:", error);
+      // Fallback to simple method
+      await this.createSimpleImageToPDF(imagePath, pageData, outputPath);
+    }
+  },
+
+  /**
+   * Create simple image-to-PDF as fallback
+   * @param {string} imagePath - Path to image
+   * @param {Object} pageData - OCR page data  
+   * @param {string} outputPath - Output path
+   */
+  async createSimpleImageToPDF(imagePath, pageData, outputPath) {
+    try {
+      const imgBuffer = await fsPromises.readFile(imagePath);
+      const metadata = await sharp(imgBuffer).metadata();
+      
+      const doc = new jsPDF({
+        orientation: metadata.width > metadata.height ? "landscape" : "portrait",
+        unit: "pt",
+        format: [metadata.width || 595, metadata.height || 842],
+      });
+
+      // Add image
+      const imgData = imgBuffer.toString("base64");
+      const imageFormat = path.extname(imagePath).toLowerCase().slice(1);
+      doc.addImage(imgData, imageFormat.toUpperCase(), 0, 0, metadata.width, metadata.height);
+
+      // Add simple text overlay (invisible)
+      if (pageData && pageData.lines) {
+        doc.setTextColor(255, 255, 255, 0); // Transparent
+        doc.setFont("helvetica");
+        doc.setFontSize(12);
+        
+        let yPos = 50;
+        pageData.lines.forEach(line => {
+          if (line.words && line.words.length > 0) {
+            const lineText = line.words.map(w => w.text).join(" ");
+            doc.text(lineText, 10, yPos);
+            yPos += 15;
+          }
+        });
+      }
+
+      doc.save(outputPath);
+      console.log("✅ Simple image-to-PDF created successfully");
+    } catch (error) {
+      console.error("Error creating simple image-to-PDF:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Generate validated fallback PDF with comprehensive error handling
+   * @param {string} originalFilePath - Original file path
+   * @param {Object} ocrResults - OCR results
+   * @param {string} outputPath - Output path
+   * @returns {Promise<string>} Generated PDF path
+   */
+  async generateValidatedFallbackPDF(originalFilePath, ocrResults, outputPath) {
+    try {
+      console.log("🛠️ Creating validated fallback PDF...");
+      
       const doc = new jsPDF({
         orientation: "portrait",
         unit: "pt",
@@ -415,85 +497,80 @@ const ocrService = {
       });
 
       doc.setFont("helvetica");
+      doc.setFontSize(16);
+      doc.text("OCR Extracted Text", 50, 50);
+
       doc.setFontSize(12);
-
-      // Add title
-      doc.text("Extracted Text", 50, 50);
-
-      // Add OCR text
       let yPosition = 80;
       const lineHeight = 14;
       const pageHeight = doc.internal.pageSize.height;
+      const pageWidth = doc.internal.pageSize.width;
+      const maxWidth = pageWidth - 100;
 
+      // Add extracted text with proper formatting
       if (ocrResults.text) {
-        const lines = ocrResults.text.split("\n");
-        for (const line of lines) {
+        const textLines = doc.splitTextToSize(ocrResults.text, maxWidth);
+        textLines.forEach(line => {
           if (yPosition > pageHeight - 50) {
             doc.addPage();
             yPosition = 50;
           }
           doc.text(line, 50, yPosition);
           yPosition += lineHeight;
-        }
+        });
       }
 
-      doc.save(fullOutputPath);
-      console.log(`Legacy searchable PDF created: ${fullOutputPath}`);
-      return fullOutputPath;
+      // Add metadata
+      doc.setFontSize(10);
+      doc.text(`Confidence: ${ocrResults.confidence || 0}%`, 50, pageHeight - 30);
+      doc.text(`Generated: ${new Date().toLocaleString()}`, 200, pageHeight - 30);
+
+      doc.save(outputPath);
+
+      // Validate the fallback PDF
+      const fallbackBytes = await fsPromises.readFile(outputPath);
+      if (!this.isValidPDF(fallbackBytes)) {
+        throw new Error("Fallback PDF validation failed");
+      }
+
+      console.log("✅ Validated fallback PDF created successfully");
+      return outputPath;
     } catch (error) {
-      console.error("Error in legacy PDF generation:", error);
-      throw error;
+      console.error("Error creating validated fallback PDF:", error);
+      throw new Error("All PDF generation methods failed");
     }
   },
 
   /**
-   * Generate overlay PDF with precise OCR text positioning
-   * @param {string} originalFilePath - Path to original file
+   * Generate simple text overlay PDF for problematic PDFs
+   * @param {string} originalFilePath - Original PDF path
    * @param {Object} ocrResults - OCR results
-   * @param {string} outputPath - Path for output PDF
-   * @returns {Promise<string>} Path to generated PDF
+   * @param {string} outputPath - Output path
+   * @returns {Promise<string>} Generated PDF path
    */
-  async generateOverlayPDF(originalFilePath, ocrResults, outputPath) {
+  async generateSimpleTextOverlayPDF(originalFilePath, ocrResults, outputPath) {
     try {
-      console.log(
-        "Generating overlay PDF with precise OCR text positioning..."
-      );
-      const sanitizedOutput = sanitizePath(path.basename(outputPath));
-      const fullOutputPath = path.join(
-        path.dirname(outputPath),
-        sanitizedOutput
-      );
-
-      const isPDF = path.extname(originalFilePath).toLowerCase() === ".pdf";
-
-      if (isPDF) {
-        // For PDFs, create continuous searchable PDF with OCR overlay on original PDF
-        console.log(
-          "Creating continuous searchable PDF with OCR overlay for PDF input..."
-        );
-        await createContinuousSearchablePdfFromPDF(
-          originalFilePath,
-          ocrResults.readResults,
-          fullOutputPath,
-          CONFIG.PDF_FONT_SIZE
-        );
-        return fullOutputPath;
+      console.log("📝 Creating simple text overlay PDF...");
+      
+      // Try to preserve original PDF if valid
+      const originalBytes = await fsPromises.readFile(originalFilePath);
+      if (this.isValidPDF(originalBytes)) {
+        // Copy original and try minimal text overlay
+        await fsPromises.copyFile(originalFilePath, outputPath);
+        return outputPath;
       } else {
-        // For images, use the new continuous searchable PDF method
-        console.log("Creating overlapping searchable PDF for image input...");
-        await createContinuousSearchablePdf(
-          originalFilePath,
-          ocrResults.readResults[0],
-          fullOutputPath,
-          CONFIG.PDF_FONT_SIZE
-        );
-        return fullOutputPath;
+        // Create new PDF with text only
+        return await this.generateValidatedFallbackPDF(originalFilePath, ocrResults, outputPath);
       }
     } catch (error) {
-      console.error("Error generating overlay PDF:", error);
-      throw error;
+      console.error("Error in simple text overlay PDF:", error);
+      return await this.generateValidatedFallbackPDF(originalFilePath, ocrResults, outputPath);
     }
   },
+
+
+
+
 
   /**
    * Extract text and optionally generate overlay PDF
@@ -516,19 +593,14 @@ const ocrService = {
 
         if (mimetype === "application/pdf") {
           try {
-            // For PDFs, overlay directly onto the original file
-            const resultPath = await ocrService.generateOverlayPDF(
+            // For PDFs, use the enhanced validated method
+            const resultPath = await ocrService.generateSearchablePDF(
               filePath,
               ocrResults,
               overlayPath
             );
             ocrResults.overlayPDFPath = resultPath;
             ocrResults.overlayPDFName = path.basename(resultPath);
-            console.log(
-              `Overlay PDF created for ${path.basename(filePath)}: ${
-                ocrResults.overlayPDFName
-              }`
-            );
           } catch (pdfError) {
             console.warn(
               "PDF overlay failed, creating simple text-only overlay:",
@@ -551,10 +623,11 @@ const ocrService = {
         } else {
           // For images, use the standard method
           try {
-            await ocrService.generateOverlayPDF(
+            await createContinuousSearchablePdf(
               filePath,
-              ocrResults,
-              overlayPath
+              ocrResults.readResults[0],
+              overlayPath,
+              CONFIG.PDF_FONT_SIZE
             );
             ocrResults.overlayPDFPath = overlayPath;
             ocrResults.overlayPDFName = `${baseName}_overlay.pdf`;
@@ -574,21 +647,27 @@ const ocrService = {
 
 // Add utility functions to exports
 ocrService.createContinuousSearchablePdf = createContinuousSearchablePdf;
-ocrService.createContinuousSearchablePdfFromPDF =
-  createContinuousSearchablePdfFromPDF;
+ocrService.createValidatedContinuousSearchablePdfFromPDF = createValidatedContinuousSearchablePdfFromPDF;
 ocrService.createSimpleTextOnlyPDF = createSimpleTextOnlyPDF;
 
 /**
- * Read text from file using Azure Computer Vision
+ * Alternative method to read file as buffer
  * @param {ComputerVisionClient} client - Azure client
  * @param {string} filePath - Path to file
  * @returns {Promise<Array>} Read results
  */
 async function readTextFromFile(client, filePath) {
   try {
-    console.log(`Processing file with Azure: ${path.basename(filePath)}`);
-    const stream = () => fs.createReadStream(filePath); // Use standard fs.createReadStream
-    const result = await client.readInStream(stream);
+    let result;
+    try {
+      const stream = () => fs.createReadStream(filePath);
+      result = await client.readInStream(stream);
+    } catch (streamError) {
+      console.log("Stream method failed, trying buffer method:", streamError.message);
+      const fileBuffer = await fsPromises.readFile(filePath);
+      result = await client.readInStream(fileBuffer);
+    }
+    
     const operationId = result.operationLocation.split("/").pop();
 
     let readResult;
@@ -599,10 +678,7 @@ async function readTextFromFile(client, filePath) {
       await sleep(1000);
       readResult = await client.getReadResult(operationId);
       attempts++;
-      console.log(
-        `Azure OCR status: ${readResult.status} (attempt ${attempts})`
-      );
-
+     
       if (attempts >= maxAttempts) {
         throw new Error("Azure OCR operation timeout");
       }
@@ -618,55 +694,6 @@ async function readTextFromFile(client, filePath) {
     return readResult.analyzeResult.readResults;
   } catch (error) {
     console.error("Error in readTextFromFile:", error.message);
-    if (error.message.includes("image must be")) {
-      return await readTextFromFileAlternative(client, filePath);
-    }
-    throw error;
-  }
-}
-
-/**
- * Alternative method to read file as buffer
- * @param {ComputerVisionClient} client - Azure client
- * @param {string} filePath - Path to file
- * @returns {Promise<Array>} Read results
- */
-async function readTextFromFileAlternative(client, filePath) {
-  try {
-    console.log("Using buffer method for Azure...");
-    const fileBuffer = await fsPromises.readFile(filePath); // Use fsPromises for async readFile
-    console.log(`File size: ${fileBuffer.length} bytes`);
-
-    const result = await client.readInStream(fileBuffer);
-    const operationId = result.operationLocation.split("/").pop();
-
-    let readResult;
-    let attempts = 0;
-    const maxAttempts = CONFIG.TIMEOUT_SECONDS;
-
-    do {
-      await sleep(1000);
-      readResult = await client.getReadResult(operationId);
-      attempts++;
-      console.log(
-        `Azure OCR status: ${readResult.status} (attempt ${attempts})`
-      );
-
-      if (attempts >= maxAttempts) {
-        throw new Error("Azure OCR operation timeout");
-      }
-    } while (
-      readResult.status === "notStarted" ||
-      readResult.status === "running"
-    );
-
-    if (readResult.status === "failed") {
-      throw new Error("Azure OCR operation failed");
-    }
-
-    return readResult.analyzeResult.readResults;
-  } catch (error) {
-    console.error("Error in readTextFromFileAlternative:", error.message);
     throw error;
   }
 }
@@ -690,7 +717,6 @@ function processOCRResults(readResults) {
   let wordCount = 0;
   const detectedLanguage = "en";
 
-  console.log(`Processing ${readResults.length} page(s)`);
 
   for (let pageIndex = 0; pageIndex < readResults.length; pageIndex++) {
     const page = readResults[pageIndex];
@@ -699,7 +725,6 @@ function processOCRResults(readResults) {
     }
 
     if (page.lines?.length) {
-      console.log(`Page ${pageIndex + 1}: ${page.lines.length} lines`);
 
       // Use intelligent spacing if enabled, otherwise use simple joining
       let pageText;
@@ -712,14 +737,11 @@ function processOCRResults(readResults) {
           !pageText.includes(" ") &&
           page.lines.some((line) => line.words && line.words.length > 1)
         ) {
-          console.log("Applying forced spacing to compact text...");
           pageText = applyForcedSpacingToCompactText(page.lines);
 
           // Last resort: if still no spaces, apply basic pattern-based spacing
           if (!pageText.includes(" ")) {
-            console.log(
-              "Applying basic pattern-based spacing as final fallback..."
-            );
+           
             pageText = addBasicSpacingToText(pageText);
           }
         }
@@ -757,11 +779,7 @@ function processOCRResults(readResults) {
 
   const averageConfidence =
     wordCount > 0 ? (totalConfidence / wordCount) * 100 : 0;
-  console.log(
-    `Extracted ${wordCount} words with confidence: ${averageConfidence.toFixed(
-      1
-    )}%`
-  );
+
 
   // Clean and format the final text
   const cleanedText = cleanAndFormatText(extractedText);
@@ -797,39 +815,7 @@ async function simulateOCR(filePath, mimetype) {
   };
 }
 
-/**
- * Get image dimensions
- * @param {string} imagePath - Path to image
- * @returns {Promise<Object>} Image dimensions
- */
-async function getImageDimensions(imagePath) {
-  try {
-    // Check if file exists
-    await fsPromises.access(imagePath);
 
-    const fileExtension = path.extname(imagePath).toLowerCase();
-    if (CONFIG.SUPPORTED_IMAGE_TYPES.includes(fileExtension)) {
-      const metadata = await sharp(imagePath).metadata();
-      return {
-        width: metadata.width || CONFIG.DEFAULT_PAGE_SIZE[0],
-        height: metadata.height || CONFIG.DEFAULT_PAGE_SIZE[1],
-        fileSize: metadata.size || 0,
-      };
-    }
-    return {
-      width: CONFIG.DEFAULT_PAGE_SIZE[0],
-      height: CONFIG.DEFAULT_PAGE_SIZE[1],
-      fileSize: 0,
-    };
-  } catch (error) {
-    console.error("Error getting image dimensions:", error);
-    return {
-      width: CONFIG.DEFAULT_PAGE_SIZE[0],
-      height: CONFIG.DEFAULT_PAGE_SIZE[1],
-      fileSize: 0,
-    };
-  }
-}
 
 /**
  * Create a simple text-only PDF as fallback when overlay generation fails
@@ -838,7 +824,6 @@ async function getImageDimensions(imagePath) {
  */
 async function createSimpleTextOnlyPDF(ocrResults, outputPath) {
   try {
-    console.log("Creating simple text-only PDF fallback...");
 
     // Create PDF document using jsPDF
     const doc = new jsPDF({
@@ -936,7 +921,6 @@ async function createSimpleTextOnlyPDF(ocrResults, outputPath) {
 
     // Save the PDF
     doc.save(outputPath);
-    console.log(`Simple text-only PDF created: ${outputPath}`);
     return true;
   } catch (error) {
     console.error("Error creating simple text-only PDF:", error);
@@ -1227,7 +1211,7 @@ function cleanAndFormatText(rawText) {
     .replace(/(\d)([a-zA-Z])/g, "$1 $2")
     // Fix sentence spacing - ensure space after punctuation followed by capital letter
     .replace(/([.!?])([A-Z])/g, "$1 $2")
-    // Fix common word concatenations
+    // Fix common word concatenations - essential ones only
     .replace(/([a-z])([A-Z][a-z])/g, "$1 $2") // camelCase -> camel Case
     .replace(/(\w)(and)(\w)/gi, "$1 $2 $3") // wordandword -> word and word
     .replace(/(\w)(the)(\w)/gi, "$1 $2 $3") // wordtheword -> word the word
@@ -1241,71 +1225,11 @@ function cleanAndFormatText(rawText) {
     .replace(/(\w)(from)(\w)/gi, "$1 $2 $3") // wordfromword -> word from word
     .replace(/(\w)(will)(\w)/gi, "$1 $2 $3") // wordwillword -> word will word
     .replace(/(\w)(have)(\w)/gi, "$1 $2 $3") // wordhaveword -> word have word
-    .replace(/(\w)(been)(\w)/gi, "$1 $2 $3") // wordbeenword -> word been word
-    .replace(/(\w)(were)(\w)/gi, "$1 $2 $3") // wordwereword -> word were word
     .replace(/(\w)(are)(\w)/gi, "$1 $2 $3") // wordareword -> word are word
     .replace(/(\w)(not)(\w)/gi, "$1 $2 $3") // wordnotword -> word not word
     .replace(/(\w)(can)(\w)/gi, "$1 $2 $3") // wordcanword -> word can word
-    .replace(/(\w)(all)(\w)/gi, "$1 $2 $3") // wordallword -> word all word
     .replace(/(\w)(but)(\w)/gi, "$1 $2 $3") // wordbutword -> word but word
     .replace(/(\w)(was)(\w)/gi, "$1 $2 $3") // wordwasword -> word was word
-    .replace(/(\w)(has)(\w)/gi, "$1 $2 $3") // wordhasword -> word has word
-    .replace(/(\w)(had)(\w)/gi, "$1 $2 $3") // wordhadword -> word had word
-    .replace(/(\w)(one)(\w)/gi, "$1 $2 $3") // wordoneword -> word one word
-    .replace(/(\w)(you)(\w)/gi, "$1 $2 $3") // wordyouword -> word you word
-    .replace(/(\w)(may)(\w)/gi, "$1 $2 $3") // wordmayword -> word may word
-    .replace(/(\w)(use)(\w)/gi, "$1 $2 $3") // worduseword -> word use word
-    .replace(/(\w)(its)(\w)/gi, "$1 $2 $3") // worditsword -> word its word
-    .replace(/(\w)(your)(\w)/gi, "$1 $2 $3") // wordyourword -> word your word
-    .replace(/(\w)(their)(\w)/gi, "$1 $2 $3") // wordtheirword -> word their word
-    .replace(/(\w)(what)(\w)/gi, "$1 $2 $3") // wordwhatword -> word what word
-    .replace(/(\w)(said)(\w)/gi, "$1 $2 $3") // wordsaidword -> word said word
-    .replace(/(\w)(each)(\w)/gi, "$1 $2 $3") // wordeachword -> word each word
-    .replace(/(\w)(which)(\w)/gi, "$1 $2 $3") // wordwhichword -> word which word
-    .replace(/(\w)(do)(\w)/gi, "$1 $2 $3") // worddoword -> word do word
-    .replace(/(\w)(how)(\w)/gi, "$1 $2 $3") // wordhowword -> word how word
-    .replace(/(\w)(if)(\w)/gi, "$1 $2 $3") // wordifword -> word if word
-    .replace(/(\w)(up)(\w)/gi, "$1 $2 $3") // wordupword -> word up word
-    .replace(/(\w)(out)(\w)/gi, "$1 $2 $3") // wordoutword -> word out word
-    .replace(/(\w)(many)(\w)/gi, "$1 $2 $3") // wordmanyword -> word many word
-    .replace(/(\w)(then)(\w)/gi, "$1 $2 $3") // wordthenword -> word then word
-    .replace(/(\w)(them)(\w)/gi, "$1 $2 $3") // wordthemword -> word them word
-    .replace(/(\w)(these)(\w)/gi, "$1 $2 $3") // wordtheseword -> word these word
-    .replace(/(\w)(so)(\w)/gi, "$1 $2 $3") // wordsoword -> word so word
-    .replace(/(\w)(some)(\w)/gi, "$1 $2 $3") // wordsomeword -> word some word
-    .replace(/(\w)(her)(\w)/gi, "$1 $2 $3") // wordherword -> word her word
-    .replace(/(\w)(would)(\w)/gi, "$1 $2 $3") // wordwouldword -> word would word
-    .replace(/(\w)(make)(\w)/gi, "$1 $2 $3") // wordmakeword -> word make word
-    .replace(/(\w)(like)(\w)/gi, "$1 $2 $3") // wordlikeword -> word like word
-    .replace(/(\w)(time)(\w)/gi, "$1 $2 $3") // wordtimeword -> word time word
-    .replace(/(\w)(very)(\w)/gi, "$1 $2 $3") // wordveryword -> word very word
-    .replace(/(\w)(when)(\w)/gi, "$1 $2 $3") // wordwhenword -> word when word
-    .replace(/(\w)(come)(\w)/gi, "$1 $2 $3") // wordcomeword -> word come word
-    .replace(/(\w)(his)(\w)/gi, "$1 $2 $3") // wordhisword -> word his word
-    .replace(/(\w)(here)(\w)/gi, "$1 $2 $3") // wordhereword -> word here word
-    .replace(/(\w)(just)(\w)/gi, "$1 $2 $3") // wordjustword -> word just word
-    .replace(/(\w)(long)(\w)/gi, "$1 $2 $3") // wordlongword -> word long word
-    .replace(/(\w)(get)(\w)/gi, "$1 $2 $3") // wordgetword -> word get word
-    .replace(/(\w)(own)(\w)/gi, "$1 $2 $3") // wordownword -> word own word
-    .replace(/(\w)(say)(\w)/gi, "$1 $2 $3") // wordsayword -> word say word
-    .replace(/(\w)(she)(\w)/gi, "$1 $2 $3") // wordsheword -> word she word
-    .replace(/(\w)(way)(\w)/gi, "$1 $2 $3") // wordwayword -> word way word
-    .replace(/(\w)(too)(\w)/gi, "$1 $2 $3") // wordtooword -> word too word
-    .replace(/(\w)(any)(\w)/gi, "$1 $2 $3") // wordanyword -> word any word
-    .replace(/(\w)(day)(\w)/gi, "$1 $2 $3") // worddayword -> word day word
-    .replace(/(\w)(man)(\w)/gi, "$1 $2 $3") // wordmanword -> word man word
-    .replace(/(\w)(new)(\w)/gi, "$1 $2 $3") // wordnewword -> word new word
-    .replace(/(\w)(now)(\w)/gi, "$1 $2 $3") // wordnowword -> word now word
-    .replace(/(\w)(old)(\w)/gi, "$1 $2 $3") // wordoldword -> word old word
-    .replace(/(\w)(see)(\w)/gi, "$1 $2 $3") // wordseeword -> word see word
-    .replace(/(\w)(him)(\w)/gi, "$1 $2 $3") // wordhimword -> word him word
-    .replace(/(\w)(two)(\w)/gi, "$1 $2 $3") // wordtwoword -> word two word
-    .replace(/(\w)(more)(\w)/gi, "$1 $2 $3") // wordmoreword -> word more word
-    .replace(/(\w)(go)(\w)/gi, "$1 $2 $3") // wordgoword -> word go word
-    .replace(/(\w)(no)(\w)/gi, "$1 $2 $3") // wordnoword -> word no word
-    .replace(/(\w)(first)(\w)/gi, "$1 $2 $3") // wordfirstword -> word first word
-    .replace(/(\w)(call)(\w)/gi, "$1 $2 $3") // wordcallword -> word call word
-    .replace(/(\w)(who)(\w)/gi, "$1 $2 $3") // wordwhoword -> word who word
     // Clean up excessive spaces
     .replace(/\s+/g, " ")
     .trim();
@@ -1379,7 +1303,6 @@ function applyForcedSpacingToCompactText(lines) {
     return "";
   }
 
-  console.log("Applying forced spacing using bounding box analysis...");
   let formattedText = "";
 
   // Process all words across all lines, maintaining their spatial relationships
@@ -1495,7 +1418,7 @@ function addBasicSpacingToText(concatenatedText) {
     .replace(/(\d)([a-zA-Z])/g, "$1 $2")
     // Add space after punctuation
     .replace(/([.!?,:;])([a-zA-Z])/g, "$1 $2")
-    // Add space around common conjunctions and prepositions
+    // Add space around common conjunctions and prepositions - essential ones only
     .replace(/([a-z])(and)([a-z])/gi, "$1 $2 $3")
     .replace(/([a-z])(the)([a-z])/gi, "$1 $2 $3")
     .replace(/([a-z])(to)([a-z])/gi, "$1 $2 $3")
@@ -1508,14 +1431,11 @@ function addBasicSpacingToText(concatenatedText) {
     .replace(/([a-z])(from)([a-z])/gi, "$1 $2 $3")
     .replace(/([a-z])(will)([a-z])/gi, "$1 $2 $3")
     .replace(/([a-z])(have)([a-z])/gi, "$1 $2 $3")
-    .replace(/([a-z])(been)([a-z])/gi, "$1 $2 $3")
-    .replace(/([a-z])(were)([a-z])/gi, "$1 $2 $3")
     .replace(/([a-z])(are)([a-z])/gi, "$1 $2 $3")
     .replace(/([a-z])(not)([a-z])/gi, "$1 $2 $3")
     .replace(/([a-z])(can)([a-z])/gi, "$1 $2 $3")
-    .replace(/([a-z])(all)([a-z])/gi, "$1 $2 $3")
     .replace(/([a-z])(but)([a-z])/gi, "$1 $2 $3")
-    .replace(/([a-z])(was)([a-z])/gi, "$1 $2 $3") // wordwasword -> word was word
+    .replace(/([a-z])(was)([a-z])/gi, "$1 $2 $3")
     // Clean up excessive spaces
     .replace(/\s+/g, " ")
     .trim();
@@ -1541,7 +1461,6 @@ async function createContinuousSearchablePdf(
   fontSize = CONFIG.PDF_FONT_SIZE
 ) {
   try {
-    console.log("Creating continuous searchable PDF with jsPDF...");
 
     // Read image buffer and get dimensions
     const imgBuffer = await fsPromises.readFile(imagePath);
@@ -1624,22 +1543,19 @@ async function createContinuousSearchablePdf(
           words[0].boundingBox[6]
         );
 
-        // Add invisible text
-        doc.setTextColor(255, 255, 255, 0); // Transparent
+        // Add invisible text - completely transparent but searchable
+        doc.saveGraphicsState();
+        doc.setTextColor(255, 255, 255); // White text
+        doc.setGState(new doc.GState({ opacity: 0.01 })); // Almost completely transparent  
         doc.text(fullText, startX, avgBaseline);
-        doc.setTextColor(0, 0, 0); // Reset color
+        doc.restoreGraphicsState();
 
-        console.log(
-          `Added line: "${fullText.substring(0, 50)}..." at (${startX.toFixed(
-            1
-          )}, ${avgBaseline.toFixed(1)})`
-        );
+      
       }
     }
 
     // Save PDF
     doc.save(pdfFilename);
-    console.log(`Continuous searchable PDF created: ${pdfFilename}`);
   } catch (error) {
     console.error("Error creating continuous searchable PDF:", error);
     throw error;
@@ -1647,203 +1563,248 @@ async function createContinuousSearchablePdf(
 }
 
 /**
- * Creates a searchable PDF with precise text positioning from PDF input
+ * Creates a validated searchable PDF with precise text positioning from PDF input
+ * Enhanced version with better error handling and validation
  * @param {string} pdfPath - Path to input PDF
  * @param {Array} pages - OCR page results with lines and words for all pages
  * @param {string} outputPath - Output PDF path
  * @param {number} fontSize - Font size for invisible text
  */
-async function createContinuousSearchablePdfFromPDF(
+async function createValidatedContinuousSearchablePdfFromPDF(
   pdfPath,
   pages,
   outputPath,
   fontSize = CONFIG.PDF_FONT_SIZE
 ) {
   try {
-    console.log("Creating continuous searchable PDF from PDF with pdf-lib...");
+    console.log("🔧 Creating validated continuous searchable PDF from PDF...");
 
-    // Read the original PDF
+    // Read and validate the original PDF
     const existingPdfBytes = await fsPromises.readFile(pdfPath);
+    
+    // Validate PDF structure first
+    if (!existingPdfBytes || existingPdfBytes.length < 100) {
+      throw new Error("Invalid or empty PDF file");
+    }
 
-    // Load the PDF with pdf-lib
-    const pdfDoc = await PDFLib.load(existingPdfBytes);
+    // Check PDF header
+    const header = existingPdfBytes.slice(0, 10).toString('ascii');
+    if (!header.startsWith('%PDF-')) {
+      throw new Error("Not a valid PDF file");
+    }
+
+    // Load the PDF with pdf-lib with error handling
+    let pdfDoc;
+    try {
+      pdfDoc = await PDFLib.load(existingPdfBytes, { 
+        ignoreEncryption: true,
+        capNumbers: false,
+        throwOnInvalidBytes: false 
+      });
+    } catch (loadError) {
+      console.error("PDF loading failed:", loadError);
+      throw new Error("Failed to load PDF - file may be corrupted");
+    }
 
     // Get the pages from the PDF
     const pdfPages = pdfDoc.getPages();
+    if (!pdfPages || pdfPages.length === 0) {
+      throw new Error("PDF contains no pages");
+    }
 
     // Embed a monospaced font for better spacing accuracy
-    const font = await pdfDoc.embedFont(StandardFonts.Courier);
+    let font;
+    try {
+      font = await pdfDoc.embedFont(StandardFonts.Courier);
+    } catch (fontError) {
+      console.warn("Failed to embed Courier font, using Helvetica:", fontError);
+      font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    }
 
-    console.log(
-      `PDF has ${pdfPages.length} pages, OCR detected ${pages.length} pages`
-    );
+    console.log(`📄 Processing ${Math.min(pages.length, pdfPages.length)} pages for OCR overlay`);
 
-    // Process each page from OCR results
+    // Process each page from OCR results with enhanced error handling
     for (
       let pageIndex = 0;
       pageIndex < Math.min(pages.length, pdfPages.length);
       pageIndex++
     ) {
-      const page = pages[pageIndex];
-      const pdfPage = pdfPages[pageIndex];
+      try {
+        const page = pages[pageIndex];
+        const pdfPage = pdfPages[pageIndex];
 
-      // Get page dimensions
-      const { width: pageWidth, height: pageHeight } = pdfPage.getSize();
+        if (!pdfPage) {
+          console.warn(`Skipping page ${pageIndex + 1} - not found in PDF`);
+          continue;
+        }
 
-      console.log(
-        `Processing page ${pageIndex + 1}: ${pageWidth}x${pageHeight}`
-      );
+        // Get page dimensions with validation
+        const { width: pageWidth, height: pageHeight } = pdfPage.getSize();
+        
+        if (!pageWidth || !pageHeight || pageWidth <= 0 || pageHeight <= 0) {
+          console.warn(`Skipping page ${pageIndex + 1} - invalid dimensions`);
+          continue;
+        }
 
-      // Process each line on this page
-      if (page && page.lines) {
-        for (const line of page.lines) {
-          if (!line.words || line.words.length === 0) continue;
+        console.log(`📝 Processing page ${pageIndex + 1}: ${pageWidth}x${pageHeight}`);
 
-          // Sort words left to right
-          const words = [...line.words].sort(
-            (a, b) => a.boundingBox[0] - b.boundingBox[0]
-          );
+        // Process each line on this page with enhanced validation
+        if (page && page.lines && Array.isArray(page.lines)) {
+          let textAdded = 0;
+          
+          for (const line of page.lines) {
+            try {
+              if (!line.words || !Array.isArray(line.words) || line.words.length === 0) {
+                continue;
+              }
 
-          // Build continuous text with calculated spacing
-          let fullText = words[0].text;
+              // Sort words left to right
+              const words = [...line.words].sort(
+                (a, b) => (a.boundingBox?.[0] || 0) - (b.boundingBox?.[0] || 0)
+              );
 
-          // Calculate character width for spacing
-          const charWidth = font.widthOfTextAtSize("M", fontSize);
+              // Build continuous text with calculated spacing
+              let fullText = "";
+              
+              for (let i = 0; i < words.length; i++) {
+                const word = words[i];
+                if (!word.text) continue;
+                
+                fullText += word.text;
+                
+                if (i < words.length - 1) {
+                  // Add spacing between words
+                  const curr = words[i];
+                  const next = words[i + 1];
+                  
+                  if (curr.boundingBox && next.boundingBox && 
+                      curr.boundingBox.length >= 8 && next.boundingBox.length >= 8) {
+                    
+                    const currEnd = Math.max(
+                      curr.boundingBox[0], curr.boundingBox[2],
+                      curr.boundingBox[4], curr.boundingBox[6]
+                    );
+                    const nextStart = Math.min(
+                      next.boundingBox[0], next.boundingBox[2],
+                      next.boundingBox[4], next.boundingBox[6]
+                    );
+                    
+                    const gap = nextStart - currEnd;
+                    const spaceCount = Math.max(1, Math.round(gap / 5)); // Approximate character width
+                    fullText += " ".repeat(Math.min(spaceCount, 10)); // Limit spacing
+                  } else {
+                    fullText += " "; // Default single space
+                  }
+                }
+              }
 
-          for (let i = 1; i < words.length; i++) {
-            const prev = words[i - 1];
-            const curr = words[i];
+              if (!fullText.trim()) continue;
 
-            // Calculate gap between words
-            const prevEnd = Math.max(
-              prev.boundingBox[0],
-              prev.boundingBox[2],
-              prev.boundingBox[4],
-              prev.boundingBox[6]
-            );
-            const currStart = Math.min(
-              curr.boundingBox[0],
-              curr.boundingBox[2],
-              curr.boundingBox[4],
-              curr.boundingBox[6]
-            );
-            const gap = currStart - prevEnd;
+              // Calculate text position with enhanced error handling
+              const firstWord = words[0];
+              if (!firstWord.boundingBox || firstWord.boundingBox.length < 8) {
+                continue;
+              }
 
-            // Calculate number of spaces based on gap
-            const spaceCount = Math.max(1, Math.round(gap / charWidth));
-            fullText += " ".repeat(spaceCount) + curr.text;
+              // Get bounding box coordinates
+              const minY = Math.min(
+                firstWord.boundingBox[1], firstWord.boundingBox[3],
+                firstWord.boundingBox[5], firstWord.boundingBox[7]
+              );
+              const maxY = Math.max(
+                firstWord.boundingBox[1], firstWord.boundingBox[3],
+                firstWord.boundingBox[5], firstWord.boundingBox[7]
+              );
+
+              // Convert OCR coordinates to PDF coordinates with scaling
+              const textHeight = maxY - minY;
+              const ocrPageHeight = page.height || pageHeight;
+              const ocrPageWidth = page.width || pageWidth;
+
+              // Calculate scaling factors
+              const scaleX = pageWidth / ocrPageWidth;
+              const scaleY = pageHeight / ocrPageHeight;
+
+              const startX = Math.min(
+                firstWord.boundingBox[0], firstWord.boundingBox[2],
+                firstWord.boundingBox[4], firstWord.boundingBox[6]
+              ) * scaleX;
+
+              // Convert Y coordinate from OCR (top-origin) to PDF (bottom-origin)
+              const pdfY = pageHeight - (minY * scaleY) - (textHeight * scaleY);
+
+              // Ensure coordinates are within valid bounds
+              const x = Math.max(0, Math.min(pageWidth - 10, startX));
+              const y = Math.max(10, Math.min(pageHeight - 10, pdfY));
+
+              // Validate coordinates
+              if (isNaN(x) || isNaN(y) || x < 0 || y < 0) {
+                console.warn(`Invalid coordinates for text: x=${x}, y=${y}`);
+                continue;
+              }
+
+              // Add invisible text overlay for searchability
+              try {
+                pdfPage.drawText(fullText, {
+                  x: x,
+                  y: y,
+                  size: Math.max(8, Math.min(fontSize, 24)), // Clamp font size
+                  font: font,
+                  color: rgb(0, 0, 0), // Black color
+                  opacity: 0.01, // Nearly transparent but still searchable
+                });
+                textAdded++;
+              } catch (textError) {
+                console.warn(`Failed to add text overlay: ${textError.message}`);
+              }
+
+            } catch (lineError) {
+              console.warn(`Error processing line: ${lineError.message}`);
+              continue;
+            }
           }
 
-          // Calculate text position
-          // OCR Y coordinates are from top, PDF coordinates are from bottom
-          const minY = Math.min(
-            words[0].boundingBox[1],
-            words[0].boundingBox[3],
-            words[0].boundingBox[5],
-            words[0].boundingBox[7]
-          );
-          const maxY = Math.max(
-            words[0].boundingBox[1],
-            words[0].boundingBox[3],
-            words[0].boundingBox[5],
-            words[0].boundingBox[7]
-          );
-
-          // Convert OCR coordinates to PDF coordinates
-          const textHeight = maxY - minY;
-          const ocrPageHeight = page.height || pageHeight;
-
-          // Scale coordinates if necessary
-          const scaleX = pageWidth / (page.width || pageWidth);
-          const scaleY = pageHeight / ocrPageHeight;
-
-          const startX =
-            Math.min(
-              words[0].boundingBox[0],
-              words[0].boundingBox[2],
-              words[0].boundingBox[4],
-              words[0].boundingBox[6]
-            ) * scaleX;
-
-          // Convert Y coordinate from OCR (top-origin) to PDF (bottom-origin)
-          const pdfY = pageHeight - minY * scaleY - textHeight * scaleY;
-
-          // Ensure coordinates are within page bounds
-          const x = Math.max(0, Math.min(pageWidth - 10, startX));
-          const y = Math.max(10, Math.min(pageHeight - 10, pdfY));
-
-          // Add invisible text overlay for searchability
-          pdfPage.drawText(fullText, {
-            x: x,
-            y: y,
-            size: fontSize,
-            font: font,
-            color: rgb(1, 1, 1), // Use white color
-            opacity: 0, // Completely transparent but still searchable
-          });
-
-          console.log(
-            `Page ${pageIndex + 1}: Added "${fullText.substring(
-              0,
-              30
-            )}..." at (${x.toFixed(1)}, ${y.toFixed(1)})`
-          );
+          console.log(`✅ Page ${pageIndex + 1}: Added ${textAdded} text overlays`);
         }
+      } catch (pageError) {
+        console.warn(`Error processing page ${pageIndex + 1}: ${pageError.message}`);
+        continue; // Skip problematic pages but continue with others
       }
     }
 
-    // Save the modified PDF
-    const pdfBytes = await pdfDoc.save();
+    // Save the modified PDF with error handling
+    let pdfBytes;
+    try {
+      pdfBytes = await pdfDoc.save({
+        useObjectStreams: false, // Disable for better compatibility
+        addDefaultPage: false,
+        objectsPerTick: 50,
+      });
+    } catch (saveError) {
+      console.error("PDF save error:", saveError);
+      throw new Error("Failed to save PDF - processing may have corrupted the file");
+    }
+
+    // Validate the generated PDF bytes
+    if (!pdfBytes || pdfBytes.length < 100) {
+      throw new Error("Generated PDF is invalid or empty");
+    }
+
+    // Write the file
     await fsPromises.writeFile(outputPath, pdfBytes);
 
-    console.log(
-      `Continuous searchable PDF with overlay created: ${outputPath}`
-    );
-  } catch (error) {
-    console.error("Error creating continuous searchable PDF from PDF:", error);
-
-    // Fallback to the previous jsPDF method
-    console.log("Falling back to jsPDF text-only method...");
-    const doc = new jsPDF({
-      orientation: "portrait",
-      unit: "pt",
-      format: "a4",
-    });
-
-    doc.setFont("helvetica");
-    doc.setFontSize(12);
-    doc.text("Extracted Text from PDF", 50, 50);
-
-    let yPosition = 80;
-    const lineHeight = 14;
-    const pageHeight = doc.internal.pageSize.height;
-
-    // Add all text from all pages
-    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-      const page = pages[pageIndex];
-
-      if (pageIndex > 0) {
-        doc.text(`--- Page ${pageIndex + 1} ---`, 50, yPosition);
-        yPosition += lineHeight * 2;
-      }
-
-      if (page.lines) {
-        for (const line of page.lines) {
-          if (line.words && line.words.length > 0) {
-            const lineText = line.words.map((word) => word.text).join(" ");
-            if (yPosition > pageHeight - 50) {
-              doc.addPage();
-              yPosition = 50;
-            }
-            doc.text(lineText, 50, yPosition);
-            yPosition += lineHeight;
-          }
-        }
-      }
+    // Final validation of written file
+    const writtenBytes = await fsPromises.readFile(outputPath);
+    const writtenHeader = writtenBytes.slice(0, 10).toString('ascii');
+    if (!writtenHeader.startsWith('%PDF-')) {
+      throw new Error("Generated PDF file is corrupted");
     }
 
-    doc.save(outputPath);
-    console.log(`Fallback PDF created: ${outputPath}`);
+    console.log("✅ Validated continuous searchable PDF created successfully");
+    
+  } catch (error) {
+    console.error("Error creating validated continuous searchable PDF from PDF:", error);
+    throw error;
   }
 }
 

@@ -78,7 +78,6 @@ router.post('/debug', upload.any(), (req, res) => {
     }
   };
   
-  console.log('Debug info:', JSON.stringify(debugInfo, null, 2));
   res.json(debugInfo);
 });
 
