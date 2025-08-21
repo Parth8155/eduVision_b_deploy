@@ -33,12 +33,10 @@ const corsOptions = {
     // Get allowed origins from environment variable or use defaults
     const envOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : [];
     const allowedOrigins = [
-      "http://localhost:3000",
-      "http://localhost:5173",
-      "https://edu-vision-deploy-6gib9rm9c-parth8155s-projects.vercel.app/",
-      "https://delightful-water-091bb7200.2.azurestaticapps.net",
-      ...envOrigins
-    ];
+  "http://localhost:3000",
+  "https://delightful-water-091bb7200.2.azurestaticapps.net",
+  "https://edu-vision-deploy-6gib9rm9c-parth8155s-projects.vercel.app" // <-- Add this
+];
 
     // Allow any origin ending with .azurestaticapps.net
     const isAzureStaticApp = origin && origin.endsWith('.azurestaticapps.net');
