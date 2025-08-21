@@ -17,6 +17,10 @@ const studyMaterialsRoutes = require("./routes/studyMaterials");
 
 const app = express();
 
+// Trust proxy when running behind Azure App Service or load balancer
+// This fixes ERR_ERL_UNEXPECTED_X_FORWARDED_FOR error
+app.set('trust proxy', 1);
+
 // Connect to MongoDB
 connectDB();
 
@@ -53,12 +57,16 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Rate limiting
+// Rate limiting with custom keyGenerator to handle proxied requests
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
   standardHeaders: true,
   legacyHeaders: false,
+  // Custom keyGenerator to avoid X-Forwarded-For parsing errors
+  keyGenerator: (req) => {
+    return req.ip || req.connection.remoteAddress || 'unknown';
+  },
 });
 app.use(limiter);
 
@@ -69,6 +77,20 @@ app.use(cookieParser());
 
 // Serve static files
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
+
+// Health check endpoint to avoid 404s
+app.get('/', (req, res) => {
+  res.status(200).json({ 
+    success: true, 
+    message: 'eduVision Backend API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Handle favicon requests to reduce log noise
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end();
+});
 
 // Routes
 app.use("/api/auth", authRoutes);
