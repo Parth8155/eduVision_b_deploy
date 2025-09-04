@@ -1,5 +1,6 @@
 const Note = require("../models/Note");
 const User = require("../models/User");
+const { validationResult } = require("express-validator");
 const { sendSuccess, sendError } = require("../utils/responseUtils");
 
 const notesController = {
@@ -108,6 +109,108 @@ const notesController = {
     } catch (error) {
       console.error("Get user folders error:", error);
       sendError(res, "Failed to retrieve folders");
+    }
+  },
+
+  // Create a new subject
+  createSubject: async (req, res) => {
+    try {
+      // Check for validation errors
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, errors.array()[0].msg, 400);
+      }
+
+      const userId = req.user._id;
+      const { name } = req.body;
+      const subjectName = name.trim();
+
+      // Check if subject already exists for this user
+      const existingSubject = await Note.findOne({ 
+        userId: userId, 
+        subject: { $regex: new RegExp(`^${subjectName}$`, 'i') } 
+      });
+
+      if (existingSubject) {
+        return sendError(res, "Subject already exists", 400);
+      }
+
+      // Create a placeholder note to establish the subject
+      // This will be a temporary note that can be deleted later if needed
+      const placeholderNote = new Note({
+        userId: userId,
+        title: `${subjectName} - Subject Created`,
+        subject: subjectName,
+        folder: "General",
+        type: "notes",
+        status: "completed",
+        extractedText: `Subject "${subjectName}" was created on ${new Date().toLocaleDateString()}`,
+        tags: ["system-created", "subject-placeholder"]
+      });
+
+      await placeholderNote.save();
+
+      sendSuccess(res, "Subject created successfully", { 
+        subject: {
+          name: subjectName,
+          _id: subjectName.toLowerCase().replace(/\s+/g, '-')
+        }
+      });
+    } catch (error) {
+      console.error("Create subject error:", error);
+      sendError(res, "Failed to create subject");
+    }
+  },
+
+  // Create a new folder
+  createFolder: async (req, res) => {
+    try {
+      // Check for validation errors
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return sendError(res, errors.array()[0].msg, 400);
+      }
+
+      const userId = req.user._id;
+      const { name, subject } = req.body;
+      const folderName = name.trim();
+      const subjectName = subject.trim();
+
+      // Check if folder already exists for this user and subject
+      const existingFolder = await Note.findOne({ 
+        userId: userId, 
+        subject: { $regex: new RegExp(`^${subjectName}$`, 'i') },
+        folder: { $regex: new RegExp(`^${folderName}$`, 'i') }
+      });
+
+      if (existingFolder) {
+        return sendError(res, "Folder already exists in this subject", 400);
+      }
+
+      // Create a placeholder note to establish the folder
+      const placeholderNote = new Note({
+        userId: userId,
+        title: `${folderName} - Folder Created`,
+        subject: subjectName,
+        folder: folderName,
+        type: "notes",
+        status: "completed",
+        extractedText: `Folder "${folderName}" was created in "${subjectName}" on ${new Date().toLocaleDateString()}`,
+        tags: ["system-created", "folder-placeholder"]
+      });
+
+      await placeholderNote.save();
+
+      sendSuccess(res, "Folder created successfully", { 
+        folder: {
+          name: folderName,
+          subject: subjectName,
+          _id: folderName.toLowerCase().replace(/\s+/g, '-')
+        }
+      });
+    } catch (error) {
+      console.error("Create folder error:", error);
+      sendError(res, "Failed to create folder");
     }
   },
 

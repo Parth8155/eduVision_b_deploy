@@ -33,7 +33,7 @@ const corsOptions = {
     // Get allowed origins from environment variable or use defaults
     const envOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : [];
     const allowedOrigins = [
-  "http://localhost:3000",
+  "http://localhost:5173",
   "https://delightful-water-091bb7200.2.azurestaticapps.net",
   "https://edu-vision-deploy-6gib9rm9c-parth8155s-projects.vercel.app" // <-- Add this
 ];
