@@ -25,9 +25,25 @@ const StudyMaterialSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // New hierarchical organization fields
+    branch: {
+      type: String,
+      required: false,
+      index: true,
+    },
+    semester: {
+      type: String,
+      required: false,
+      index: true,
+    },
     subject: {
       type: String,
       required: true,
+      index: true,
+    },
+    noteType: {
+      type: String,
+      required: false,
       index: true,
     },
     content: {
@@ -105,10 +121,6 @@ const StudyMaterialSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
-    folder: {
-      type: String,
-      default: "",
-    },
     shareSettings: {
       isPublic: {
         type: Boolean,
@@ -140,7 +152,10 @@ const StudyMaterialSchema = new mongoose.Schema(
 
 // Indexes for better performance
 StudyMaterialSchema.index({ userId: 1, type: 1 });
+StudyMaterialSchema.index({ userId: 1, branch: 1 });
+StudyMaterialSchema.index({ userId: 1, semester: 1 });
 StudyMaterialSchema.index({ userId: 1, subject: 1 });
+StudyMaterialSchema.index({ userId: 1, noteType: 1 });
 StudyMaterialSchema.index({ userId: 1, createdAt: -1 });
 StudyMaterialSchema.index({ userId: 1, "stats.lastAccessed": -1 });
 StudyMaterialSchema.index({ sourceNoteId: 1 });
@@ -196,7 +211,7 @@ StudyMaterialSchema.statics.getByUserAndType = function (userId, type, options =
   
   return this.find(query)
     .sort(sort)
-    .populate("sourceNoteId", "title subject folder")
+    .populate("sourceNoteId", "title subject")
     .limit(options.limit || 50)
     .skip(options.offset || 0);
 };
@@ -204,7 +219,7 @@ StudyMaterialSchema.statics.getByUserAndType = function (userId, type, options =
 StudyMaterialSchema.statics.getStarred = function (userId) {
   return this.find({ userId, isStarred: true, status: { $ne: "archived" } })
     .sort({ "stats.lastAccessed": -1 })
-    .populate("sourceNoteId", "title subject folder");
+    .populate("sourceNoteId", "title subject");
 };
 
 StudyMaterialSchema.statics.getRecent = function (userId, days = 7) {
@@ -217,7 +232,7 @@ StudyMaterialSchema.statics.getRecent = function (userId, days = 7) {
     "stats.lastAccessed": { $gte: dateThreshold },
   })
     .sort({ "stats.lastAccessed": -1 })
-    .populate("sourceNoteId", "title subject folder");
+    .populate("sourceNoteId", "title subject");
 };
 
 StudyMaterialSchema.statics.getSubjectCounts = function (userId) {

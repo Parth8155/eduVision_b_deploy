@@ -121,7 +121,7 @@ const uploadController = {
       // Extract text fields from req.body, with fallback defaults
       const title = req.body.title || req.body.Title || "";
       const subject = req.body.subject || req.body.Subject || "";
-      const folder = req.body.folder || req.body.Folder || "General";
+      const folder = ""; // No longer using folders, set to empty string
       const tags = req.body.tags || req.body.Tags || "";
 
 
@@ -182,7 +182,7 @@ const uploadController = {
         userId: req.user._id, // Associate note with authenticated user
         title: finalTitle,
         subject: finalSubject,
-        folder: folder || "General",
+        folder: "", // No longer using folders
         tags: tagsArray,
         // Store original file as binary data
         originalFile: {
@@ -215,18 +215,6 @@ const uploadController = {
         },
       });
 
-      // Update user's folders if new folder
-      if (folder && folder !== "General") {
-        await User.findByIdAndUpdate(req.user._id, {
-          $addToSet: {
-            folders: {
-              name: folder,
-              subject: finalSubject,
-            },
-          },
-        });
-      }
-
       // Start OCR processing (async) - pass note ID and first file path for processing
       processNoteFiles(note._id, firstFile.path).catch((error) => {
         console.error("Background processing error:", error);
@@ -240,7 +228,7 @@ const uploadController = {
             id: note._id,
             title: note.title,
             subject: note.subject,
-            folder: note.folder,
+            folder: "",
             tags: note.tags,
             status: note.status,
             files: files.length,
@@ -266,13 +254,12 @@ const uploadController = {
   // Create note from uploaded files (JSON only)
   createNote: async (req, res) => {
     try {
-      const { title, subject, folder, tags, files } = req.body;
+      const { title, subject, tags, files } = req.body;
 
       // Create new note
       const note = new Note({
         title,
         subject,
-        folder: folder || "General",
         tags: tags || [],
         files: files || [],
         status: "processing",

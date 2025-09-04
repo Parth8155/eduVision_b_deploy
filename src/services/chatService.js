@@ -108,7 +108,7 @@ class ChatService {
           extractedText: conversation.noteContext.extractedText,
         };
       } else {
-        note = await Note.findById(conversation.noteId);
+        note = await Note.findById(conversation.noteId).select('title subject description extractedText');
         if (!note) {
           throw new Error("Note not found");
         }
@@ -321,6 +321,17 @@ FORMAT YOUR RESPONSES WITH PROPER STRUCTURE:
               "Failed to parse extracted JSON content:",
               innerError
             );
+            // Try to fix common JSON issues
+            let fixedContent = jsonContent;
+            // Fix trailing commas
+            fixedContent = fixedContent.replace(/,(\s*[}\]])/g, '$1');
+            // Fix missing quotes around keys
+            fixedContent = fixedContent.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":');
+            try {
+              return JSON.parse(fixedContent);
+            } catch (fixError2) {
+              console.error("Failed to fix JSON issues:", fixError2);
+            }
           }
         } else {
           // Try to fix incomplete JSON array from lines
@@ -337,6 +348,23 @@ FORMAT YOUR RESPONSES WITH PROPER STRUCTURE:
                   "Failed to fix incomplete JSON from lines:",
                   fixError
                 );
+                // Try additional fixes for unterminated strings
+                const lastQuoteIndex = jsonContent.lastIndexOf('"');
+                if (lastQuoteIndex > 0 && !jsonContent.endsWith('"')) {
+                  // Try to close unterminated string
+                  const beforeLastQuote = jsonContent.substring(0, lastQuoteIndex + 1);
+                  const afterLastQuote = jsonContent.substring(lastQuoteIndex + 1);
+                  // Find the next comma or closing bracket after the quote
+                  const nextDelimiter = afterLastQuote.search(/[,}\]]/);
+                  if (nextDelimiter >= 0) {
+                    jsonContent = beforeLastQuote + afterLastQuote.substring(0, nextDelimiter) + '"' + afterLastQuote.substring(nextDelimiter);
+                    try {
+                      return JSON.parse(jsonContent);
+                    } catch (stringFixError) {
+                      console.error("Failed to fix unterminated string:", stringFixError);
+                    }
+                  }
+                }
               }
             }
           }

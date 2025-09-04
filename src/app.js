@@ -14,6 +14,7 @@ const chatRoutes = require("./routes/chat");
 const userNotesRoutes = require("./routes/userNotes");
 const annotationsRoutes = require("./routes/annotations");
 const studyMaterialsRoutes = require("./routes/studyMaterials");
+// const organizationRoutes = require("./routes/organization");
 
 const app = express();
 
@@ -100,6 +101,7 @@ app.use("/api/files", fileRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/annotations", annotationsRoutes);
 app.use("/api/study-materials", studyMaterialsRoutes);
+// app.use("/api/organization", organizationRoutes);
 
 // Error handling middleware
 app.use((error, req, res, next) => {

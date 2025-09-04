@@ -13,14 +13,26 @@ const noteSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    // New hierarchical organization fields
+    branch: {
+      type: String,
+      required: false,
+      trim: true,
+    },
+    semester: {
+      type: String,
+      required: false,
+      trim: true,
+    },
     subject: {
       type: String,
       required: true,
       trim: true,
     },
-    folder: {
+    noteType: {
       type: String,
-      default: "General",
+      required: false,
+      trim: true,
     },
     type: {
       type: String,
@@ -159,8 +171,10 @@ const noteSchema = new mongoose.Schema(
 
 // Index for better search performance - include userId
 noteSchema.index({ userId: 1, title: "text", subject: "text", tags: "text" });
+noteSchema.index({ userId: 1, branch: 1 });
+noteSchema.index({ userId: 1, semester: 1 });
 noteSchema.index({ userId: 1, subject: 1 });
-noteSchema.index({ userId: 1, folder: 1 });
+noteSchema.index({ userId: 1, noteType: 1 });
 noteSchema.index({ userId: 1, uploadDate: -1 });
 
 // Method to set OCR text PDF as binary

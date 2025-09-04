@@ -24,7 +24,7 @@ class StudyMaterialController {
       const userId = req.user.id;
 
       // Validate source note exists and user has access
-      const sourceNote = await Note.findOne({ _id: sourceNoteId, userId });
+      const sourceNote = await Note.findOne({ _id: sourceNoteId, userId }).select('title subject originalFile folder extractedText');
       if (!sourceNote) {
         return res.status(404).json({
           success: false,
@@ -45,7 +45,7 @@ class StudyMaterialController {
               count: generationOptions.count || 10
             }
           );
-          title = `MCQs: ${sourceNote.title}`;
+          title = StudyMaterialController.generateStudyMaterialTitle(sourceNote, "MCQ");
           break;
 
         case "summary":
@@ -54,7 +54,7 @@ class StudyMaterialController {
             generationOptions.length || "medium",
             generationOptions.format || "structured"
           );
-          title = `Summary: ${sourceNote.title}`;
+          title = StudyMaterialController.generateStudyMaterialTitle(sourceNote, "Summary");
           break;
 
         case "practice":
@@ -64,7 +64,7 @@ class StudyMaterialController {
             generationOptions.difficulty || "medium",
             generationOptions.count || 5
           );
-          title = `Practice Questions: ${sourceNote.title}`;
+          title = StudyMaterialController.generateStudyMaterialTitle(sourceNote, "Practice");
           break;
 
         default:
@@ -469,6 +469,35 @@ class StudyMaterialController {
         return `${Math.max(10, Math.ceil(practiceCount * 3))} min`;
       default:
         return "10 min";
+    }
+  }
+
+  // Generate study material title based on original filename
+  static generateStudyMaterialTitle(sourceNote, materialType) {
+    // Priority: User-entered title > Original filename (without extension)
+    let baseName;
+
+    if (sourceNote.title && sourceNote.title.trim() && sourceNote.title !== 'Untitled Note') {
+      // Use the user-entered title if it's meaningful
+      baseName = sourceNote.title.trim();
+    } else if (sourceNote.originalFile && sourceNote.originalFile.originalName) {
+      // Fall back to original filename without extension
+      baseName = sourceNote.originalFile.originalName.replace(/\.[^/.]+$/, "");
+    } else {
+      // Final fallback
+      baseName = 'Study Material';
+    }
+
+    // Create title based on material type
+    switch (materialType.toLowerCase()) {
+      case "mcq":
+        return `${baseName} - MCQs`;
+      case "summary":
+        return `${baseName} - Summary`;
+      case "practice":
+        return `${baseName} - Practice Questions`;
+      default:
+        return `${baseName} - ${materialType}`;
     }
   }
 

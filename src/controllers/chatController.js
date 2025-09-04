@@ -12,7 +12,7 @@ class ChatController {
       const userId = req.user.id;
 
       // Validate note exists and user has access
-      const note = await Note.findOne({ _id: noteId, userId });
+      const note = await Note.findOne({ _id: noteId, userId }).select('title subject description extractedText');
       if (!note) {
         return res.status(404).json({
           success: false,
@@ -95,7 +95,7 @@ class ChatController {
       const userId = req.user.id;
 
       // Verify note exists and user has access
-      const note = await Note.findOne({ _id: noteId, userId });
+      const note = await Note.findOne({ _id: noteId, userId }).select('title subject description extractedText');
       if (!note) {
         return res.status(404).json({
           success: false,
@@ -366,7 +366,7 @@ class ChatController {
       const userId = req.user.id;
 
       // Validate note exists and user has access
-      const note = await Note.findOne({ _id: noteId, userId });
+      const note = await Note.findOne({ _id: noteId, userId }).select('title subject description extractedText');
       if (!note) {
         return res.status(404).json({
           success: false,
@@ -408,7 +408,7 @@ class ChatController {
       const userId = req.user.id;
 
       // Validate note exists and user has access
-      const note = await Note.findOne({ _id: noteId, userId });
+      const note = await Note.findOne({ _id: noteId, userId }).select('title subject description extractedText');
       if (!note) {
         return res.status(404).json({
           success: false,
@@ -442,7 +442,7 @@ class ChatController {
       const userId = req.user.id;
 
       // Validate note exists and user has access
-      const note = await Note.findOne({ _id: noteId, userId });
+      const note = await Note.findOne({ _id: noteId, userId }).select('title subject description extractedText');
       if (!note) {
         return res.status(404).json({
           success: false,
@@ -501,7 +501,7 @@ class ChatController {
       const userId = req.user.id;
 
       // Validate note exists and user has access
-      const note = await Note.findOne({ _id: noteId, userId });
+      const note = await Note.findOne({ _id: noteId, userId }).select('title subject description extractedText');
       if (!note) {
         return res.status(404).json({
           success: false,
@@ -582,7 +582,7 @@ class ChatController {
       const userId = req.user.id;
 
       // Validate note exists and user has access
-      const note = await Note.findOne({ _id: noteId, userId });
+      const note = await Note.findOne({ _id: noteId, userId }).select('title subject description extractedText');
       if (!note) {
         return res.status(404).json({
           success: false,

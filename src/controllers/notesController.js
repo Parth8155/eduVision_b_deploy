@@ -1,5 +1,6 @@
 const Note = require("../models/Note");
 const User = require("../models/User");
+const Subject = require("../models/Subject");
 const { validationResult } = require("express-validator");
 const { sendSuccess, sendError } = require("../utils/responseUtils");
 
@@ -12,7 +13,6 @@ const notesController = {
         page = 1,
         limit = 10,
         subject,
-        folder,
         status,
         search,
         sortBy = "uploadDate",
@@ -23,7 +23,6 @@ const notesController = {
       const filter = { userId };
 
       if (subject) filter.subject = subject;
-      if (folder) filter.folder = folder;
       if (status) filter.status = status;
       if (search) {
         filter.$or = [
@@ -69,7 +68,10 @@ const notesController = {
     try {
       const userId = req.user._id;
 
-      const subjects = await Note.aggregate([
+      // Get subjects from both Subject collection and existing Notes
+      const subjectCollection = await Subject.find({ userId }).select('name createdAt').sort({ createdAt: -1 });
+      
+      const noteSubjects = await Note.aggregate([
         { $match: { userId: userId } },
         {
           $group: {
@@ -78,37 +80,42 @@ const notesController = {
             lastUpdated: { $max: "$updatedAt" },
           },
         },
-        { $sort: { count: -1 } },
+        { $sort: { "_id": 1 } },
       ]);
+
+      // Merge results, prioritizing subjects with notes
+      const subjectsMap = new Map();
+      
+      // Add subjects with notes
+      noteSubjects.forEach(subject => {
+        if (subject._id) { // Only if subject is not null/undefined
+          subjectsMap.set(subject._id, {
+            name: subject._id,
+            count: subject.count,
+            lastUpdated: subject.lastUpdated,
+            hasNotes: true
+          });
+        }
+      });
+
+      // Add subjects from collection that don't have notes yet
+      subjectCollection.forEach(subject => {
+        if (!subjectsMap.has(subject.name)) {
+          subjectsMap.set(subject.name, {
+            name: subject.name,
+            count: 0,
+            lastUpdated: subject.createdAt,
+            hasNotes: false
+          });
+        }
+      });
+
+      const subjects = Array.from(subjectsMap.values());
 
       sendSuccess(res, "Subjects retrieved successfully", { subjects });
     } catch (error) {
       console.error("Get user subjects error:", error);
       sendError(res, "Failed to retrieve subjects");
-    }
-  },
-
-  // Get user's folders with note counts
-  getUserFolders: async (req, res) => {
-    try {
-      const userId = req.user._id;
-
-      const folders = await Note.aggregate([
-        { $match: { userId: userId } },
-        {
-          $group: {
-            _id: { folder: "$folder", subject: "$subject" },
-            count: { $sum: 1 },
-            lastUpdated: { $max: "$updatedAt" },
-          },
-        },
-        { $sort: { "_id.subject": 1, "_id.folder": 1 } },
-      ]);
-
-      sendSuccess(res, "Folders retrieved successfully", { folders });
-    } catch (error) {
-      console.error("Get user folders error:", error);
-      sendError(res, "Failed to retrieve folders");
     }
   },
 
@@ -126,91 +133,39 @@ const notesController = {
       const subjectName = name.trim();
 
       // Check if subject already exists for this user
-      const existingSubject = await Note.findOne({ 
+      const existingSubject = await Subject.findOne({ 
         userId: userId, 
-        subject: { $regex: new RegExp(`^${subjectName}$`, 'i') } 
+        name: { $regex: new RegExp(`^${subjectName}$`, 'i') } 
       });
 
       if (existingSubject) {
         return sendError(res, "Subject already exists", 400);
       }
 
-      // Create a placeholder note to establish the subject
-      // This will be a temporary note that can be deleted later if needed
-      const placeholderNote = new Note({
+      // Create new subject in Subject collection
+      const newSubject = new Subject({
         userId: userId,
-        title: `${subjectName} - Subject Created`,
-        subject: subjectName,
-        folder: "General",
-        type: "notes",
-        status: "completed",
-        extractedText: `Subject "${subjectName}" was created on ${new Date().toLocaleDateString()}`,
-        tags: ["system-created", "subject-placeholder"]
+        name: subjectName
       });
 
-      await placeholderNote.save();
+      const savedSubject = await newSubject.save();
 
       sendSuccess(res, "Subject created successfully", { 
         subject: {
-          name: subjectName,
-          _id: subjectName.toLowerCase().replace(/\s+/g, '-')
+          _id: savedSubject._id,
+          name: savedSubject.name,
+          createdAt: savedSubject.createdAt
         }
       });
     } catch (error) {
       console.error("Create subject error:", error);
+      
+      // Handle duplicate key error
+      if (error.code === 11000) {
+        return sendError(res, "Subject already exists", 400);
+      }
+      
       sendError(res, "Failed to create subject");
-    }
-  },
-
-  // Create a new folder
-  createFolder: async (req, res) => {
-    try {
-      // Check for validation errors
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return sendError(res, errors.array()[0].msg, 400);
-      }
-
-      const userId = req.user._id;
-      const { name, subject } = req.body;
-      const folderName = name.trim();
-      const subjectName = subject.trim();
-
-      // Check if folder already exists for this user and subject
-      const existingFolder = await Note.findOne({ 
-        userId: userId, 
-        subject: { $regex: new RegExp(`^${subjectName}$`, 'i') },
-        folder: { $regex: new RegExp(`^${folderName}$`, 'i') }
-      });
-
-      if (existingFolder) {
-        return sendError(res, "Folder already exists in this subject", 400);
-      }
-
-      // Create a placeholder note to establish the folder
-      const placeholderNote = new Note({
-        userId: userId,
-        title: `${folderName} - Folder Created`,
-        subject: subjectName,
-        folder: folderName,
-        type: "notes",
-        status: "completed",
-        extractedText: `Folder "${folderName}" was created in "${subjectName}" on ${new Date().toLocaleDateString()}`,
-        tags: ["system-created", "folder-placeholder"]
-      });
-
-      await placeholderNote.save();
-
-      sendSuccess(res, "Folder created successfully", { 
-        folder: {
-          name: folderName,
-          subject: subjectName,
-          _id: folderName.toLowerCase().replace(/\s+/g, '-')
-        }
-      });
-    } catch (error) {
-      console.error("Create folder error:", error);
-      sendError(res, "Failed to create folder");
     }
   },
 
@@ -313,19 +268,16 @@ const notesController = {
         return sendError(res, "Note not found or access denied", 404);
       }
 
-      // Update access tracking fields
+      // Update access tracking fields (without incrementing views)
       const updateFields = {
         lastAccessed: new Date(),
-        $inc: { views: 1 },
       };
 
       // Track different types of access
-      if (action === "view") {
-        updateFields.$inc.views = 1;
-      } else if (action === "edit") {
+      if (action === "edit") {
         updateFields.lastEdited = new Date();
       } else if (action === "download") {
-        updateFields.$inc = { ...updateFields.$inc, downloads: 1 };
+        updateFields.$inc = { downloads: 1 };
       }
 
       // Store metadata if provided (e.g., viewing time, page number, etc.)
